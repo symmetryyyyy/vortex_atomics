@@ -352,6 +352,67 @@ module VX_decode import VX_gpu_pkg::*; #(
                 `USED_IREG (rs2);
             `endif
             end
+
+        // add for AMO decoding logic
+        `ifdef EXT_A_ENABLE
+        INST_AMO: begin
+            ex_type = EX_LSU; // AMO ops should be handled by LSU
+
+            // extract information from 32-bit instr
+            wire [4:0] amo_funct5 = instr[31:27]; // amo operation type
+            wire       aq         = instr[26];     // acquire
+            wire       rl         = instr[25];     // release
+
+            // case amo type
+            case (amo_funct5)
+                AMO_LR: begin
+                    op_type = INST_OP_BITS'(INST_LSU_AMO_LR);
+                    `USED_IREG(rs1); // LR requires rs1 as address
+                end
+                AMO_SC: begin
+                    op_type = INST_OP_BITS'(INST_LSU_AMO_SC);
+                    `USED_IREG(rs1); // SC requires rs1 as address
+                    `USED_IREG(rs2); // and rs2 as value to store
+                end
+                AMO_AMOADD,
+                AMO_AMOMIN,
+                AMO_AMOMAX,
+                AMO_AMOMINU,
+                AMO_AMOMAXU: begin
+                    op_type = INST_OP_BITS'(INST_LSU_AMO_ARITH); // arithmetical AMO ops
+                    `USED_IREG(rs1);
+                    `USED_IREG(rs2);
+                end
+                AMO_AMOSWAP,
+                AMO_AMOXOR,
+                AMO_AMOAND,
+                AMO_AMOOR: begin
+                    op_type = INST_OP_BITS'(INST_LSU_AMO_LOGIC); // logical AMO ops
+                    `USED_IREG(rs1);
+                    `USED_IREG(rs2);
+                end
+                default: begin
+                    // unknown amo ops, trigger an exception
+                    ex_type = EX_SFU;
+                    op_type = INST_OP_BITS'(INST_SFU_TMC);
+                end
+            endcase
+
+            // pack amo information to op_args
+            op_args.lsu.is_store   = (amo_funct5 == AMO_SC); // only SC is a store op? TODO: check
+            op_args.lsu.is_float   = 1'b0;                   // amo does not support float ops for now
+            op_args.lsu.offset     = 12'h0;                  // no offset for amo ops for now
+
+            op_args.lsu.is_amo     = 1'b1;                   // is amo
+            op_args.lsu.amo_funct5 = amo_funct5;             // amo type
+            op_args.lsu.amo_aq     = aq;                     // aq
+            op_args.lsu.amo_rl     = rl;                     // rl
+
+            `USED_IREG(rd); // all amo ops will store results to rd
+        end
+        `endif
+        // amo extension end
+
         `ifdef EXT_F_ENABLE
             INST_FMADD,  // 7'b1000011
             INST_FMSUB,  // 7'b1000111

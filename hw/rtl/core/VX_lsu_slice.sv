@@ -64,6 +64,15 @@ module VX_lsu_slice import VX_gpu_pkg::*; #(
 
     // address type calculation
 
+    
+    // check if it's amo op
+    wire req_is_amo = inst_lsu_is_amo(execute_if.data.op_type) && execute_if.data.op_args.lsu.is_amo;
+    // extract amo information from executet_if package
+    wire [4:0] amo_funct5 = execute_if.data.op_args.lsu.amo_funct5;
+    wire       amo_aq     = execute_if.data.op_args.lsu.amo_aq;
+    wire       amo_rl     = execute_if.data.op_args.lsu.amo_rl;
+    // end
+
     wire [NUM_LANES-1:0][MEM_FLAGS_WIDTH-1:0] mem_req_flags;
     for (genvar i = 0; i < NUM_LANES; ++i) begin : g_mem_req_flags
         wire [MEM_ADDRW-1:0] block_addr = full_addr[i][MEM_ASHIFT +: MEM_ADDRW];
@@ -72,6 +81,14 @@ module VX_lsu_slice import VX_gpu_pkg::*; #(
         wire [MEM_ADDRW-1:0] io_addr_end = MEM_ADDRW'(`XLEN'(`IO_END_ADDR) >> MEM_ASHIFT);
         assign mem_req_flags[i][MEM_REQ_FLAG_FLUSH] = req_is_fence;
         assign mem_req_flags[i][MEM_REQ_FLAG_IO] = (block_addr >= io_addr_start) && (block_addr < io_addr_end);
+
+        // extra information for amo extension
+        assign mem_req_flags[i][MEM_REQ_FLAG_AMO]               = req_is_amo;
+        assign mem_req_flags[i][MEM_REQ_FLAG_AMO_OP_END : MEM_REQ_FLAG_AMO_OP_BEGIN] = amo_funct5;
+        assign mem_req_flags[i][MEM_REQ_FLAG_AMO_ACQ]           = amo_aq;
+        assign mem_req_flags[i][MEM_REQ_FLAG_AMO_REL]           = amo_rl;
+        // extra end
+
     `ifdef LMEM_ENABLE
         // is local memory address
         wire [MEM_ADDRW-1:0] lmem_addr_start = MEM_ADDRW'(`XLEN'(`LMEM_BASE_ADDR) >> MEM_ASHIFT);

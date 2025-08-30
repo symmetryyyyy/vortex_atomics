@@ -26,6 +26,10 @@
     `define L1_ENABLE
 `endif
 
+// `ifdef AMO_ENABLE
+//     `define AMO_ENABLE 0
+// `endif
+
 `ifndef NDEBUG
 `define UUID_ENABLE
 `else

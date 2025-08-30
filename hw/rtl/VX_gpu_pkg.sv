@@ -101,7 +101,30 @@ package VX_gpu_pkg;
     localparam MEM_REQ_FLAG_FLUSH =  0;
     localparam MEM_REQ_FLAG_IO =     1;
     localparam MEM_REQ_FLAG_LOCAL =  2; // shoud be last since optional
-    localparam MEM_FLAGS_WIDTH = (MEM_REQ_FLAG_LOCAL + `LMEM_ENABLED);
+    
+
+    // req flag extension for amop operations
+    localparam MEM_REQ_FLAG_AMO          = 3;
+    // AMO op type (funct5) start bit
+    localparam MEM_REQ_FLAG_AMO_OP_BEGIN = 4;
+    // AMO op type end bit
+    localparam MEM_REQ_FLAG_AMO_OP_END   = 8;
+    // acquire
+    localparam MEM_REQ_FLAG_AMO_ACQ      = 9;
+    // release
+    localparam MEM_REQ_FLAG_AMO_REL      = 10;
+
+    // extend the flag width to match the extension
+    // `ifdef LMEM_ENABLE
+    //     `STATIC_ASSERT (`MEM_FLAGS_WIDTH > MEM_REQ_FLAG_AMO_REL, ("MEM_FLAGS_WIDTH is not large enough for AMO flags"));
+    //     `STATIC_ASSERT (`MEM_FLAGS_WIDTH > MEM_REQ_FLAG_LOCAL, ("MEM_FLAGS_WIDTH is not large enough for LMEM flags"));
+    // `else
+    //     `STATIC_ASSERT (`MEM_FLAGS_WIDTH > MEM_REQ_FLAG_AMO_REL, ("MEM_FLAGS_WIDTH is not large enough for AMO flags"));
+    // `endif
+
+    // original MEM_FLAGS_WIDTH
+    // localparam MEM_FLAGS_WIDTH = (MEM_REQ_FLAG_LOCAL + `LMEM_ENABLED);
+    localparam MEM_FLAGS_WIDTH = (MEM_REQ_FLAG_AMO_REL  + 1 + `LMEM_ENABLED);
 
     localparam VX_DCR_ADDR_WIDTH = `VX_DCR_ADDR_BITS;
     localparam VX_DCR_DATA_WIDTH = 32;
@@ -141,6 +164,10 @@ package VX_gpu_pkg;
     localparam INST_V =          7'b1010111; // vector instructions
     localparam INST_FENCE =      7'b0001111; // Fence instructions
     localparam INST_SYS =        7'b1110011; // system instructions
+
+    // Opcode for AMO
+    localparam INST_AMO =        7'b0101111; // atomic memory operations    
+
 
     // RV64I instruction specific opcodes (for any W instruction)
     localparam INST_I_W =        7'b0011011; // W type immediate instructions
@@ -326,6 +353,30 @@ package VX_gpu_pkg;
     localparam INST_LSU_SW =     4'b1010;
     localparam INST_LSU_SD =     4'b1011; // new for RV64I SD
     localparam INST_LSU_FENCE =  4'b1111;
+
+    
+    // 1. add 4 new type for AMO ops
+    // use the for remaining unused opcodes
+    localparam INST_LSU_AMO_LR    = 4'b0111;  // LR
+    localparam INST_LSU_AMO_SC    = 4'b1100;  // SC
+    localparam INST_LSU_AMO_ARITH = 4'b1101;  // ARITH
+    localparam INST_LSU_AMO_LOGIC = 4'b1110;  // LOGIC
+
+    // 2. define AMO ops
+    // sub-type
+    localparam AMO_LR      = 5'b00010;
+    localparam AMO_SC      = 5'b00011;
+    localparam AMO_AMOSWAP = 5'b00001;
+    localparam AMO_AMOADD  = 5'b00000;
+    localparam AMO_AMOXOR  = 5'b00100;
+    localparam AMO_AMOAND  = 5'b01100;
+    localparam AMO_AMOOR   = 5'b01000;
+    localparam AMO_AMOMIN  = 5'b10000;
+    localparam AMO_AMOMAX  = 5'b10001;
+    localparam AMO_AMOMINU = 5'b11000;
+    localparam AMO_AMOMAXU = 5'b11001;
+    
+
     localparam INST_LSU_BITS =   4;
 
     localparam INST_FENCE_BITS = 1;
@@ -342,6 +393,11 @@ package VX_gpu_pkg;
 
     function automatic logic inst_lsu_is_fence(input logic [INST_LSU_BITS-1:0] op);
         return (op[3:2] == 3);
+    endfunction
+
+    // use a function to check if an lsu op is amo op
+    function automatic logic inst_lsu_is_amo(input logic [INST_LSU_BITS-1:0] op);
+        return (op == INST_LSU_AMO_LR) || (op == INST_LSU_AMO_SC) || (op == INST_LSU_AMO_ARITH) || (op == INST_LSU_AMO_LOGIC);
     endfunction
 
     ///////////////////////////////////////////////////////////////////////////
@@ -509,10 +565,20 @@ package VX_gpu_pkg;
     `PACKAGE_ASSERT($bits(fpu_args_t) == INST_ARGS_BITS)
 
     typedef struct packed {
-        logic [(INST_ARGS_BITS-1-1-OFFSET_BITS)-1:0] __padding;
+        // original padding 
+        // logic [(INST_ARGS_BITS-1-1-OFFSET_BITS)-1:0] __padding;
+        // INST_ARGS_BITS: ALU_TYPE_BITS + `XLEN + 3 = 2 + 32 + 3 = 37
+        // OFFSET_BITS: 12
+        // so there's still remaining bits for amo extension
+        logic [(INST_ARGS_BITS-1-1-OFFSET_BITS-1-5-1-1)-1:0] __padding;
         logic is_store;
         logic is_float;
         logic [OFFSET_BITS-1:0] offset;
+        // extra package for amo ops
+        logic is_amo;                   // bool flag
+        logic [4:0] amo_funct5;         // specific amo type
+        logic amo_aq;                   // acquire
+        logic amo_rl;                   // release
     } lsu_args_t;
     `PACKAGE_ASSERT($bits(lsu_args_t) == INST_ARGS_BITS)
 

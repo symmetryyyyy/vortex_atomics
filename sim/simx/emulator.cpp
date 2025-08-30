@@ -451,6 +451,7 @@ Word Emulator::get_csr(uint32_t addr, uint32_t wid, uint32_t tid) {
   case VX_CSR_FRM:    return (warps_.at(wid).fcsr >> 5);
   case VX_CSR_FCSR:   return warps_.at(wid).fcsr;
 
+  // calculation of the global thread id
   case VX_CSR_MHARTID:    return (core_->id() * arch_.num_warps() + wid) * arch_.num_threads() + tid;
   case VX_CSR_THREAD_ID:  return tid;
   case VX_CSR_WARP_ID:    return wid;
