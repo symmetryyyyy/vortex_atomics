@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// One-time include guard: prevents the header from being processed multiple
+// times in a single translation unit (similar to classic #ifndef/#define guards).
+// Widely supported as a compiler pragma.
 #pragma once
 
 #include <cstdint>
@@ -135,6 +138,10 @@ class MemDevice {
 public:
   virtual ~MemDevice() {}
   virtual uint64_t size() const = 0;
+  // Generic byte-wise interfaces:
+  // - data is a typeless pointer (void*) so callers can pass any buffer type.
+  // - implementers/callers are responsible for casting to the appropriate
+  //   element type if needed and ensuring alignment when required.
   virtual void read(void* data, uint64_t addr, uint64_t size) = 0;
   virtual void write(const void* data, uint64_t addr, uint64_t size) = 0;
 };
@@ -207,9 +214,14 @@ public:
 
 
 #ifdef VM_ENABLE
+  // When VM is enabled, read/write carries an ACCESS_TYPE to drive permission
+  // checks (LOAD/STORE/FETCH). The default parameters let callers omit the
+  // fourth argument for common cases.
   void read(void* data, uint64_t addr, uint32_t size, ACCESS_TYPE type = ACCESS_TYPE::LOAD);
   void write(const void* data, uint64_t addr, uint32_t size, ACCESS_TYPE type = ACCESS_TYPE::STORE);
 #else
+  // When VM is disabled, the 4th parameter is a simple privilege/flags boolean
+  // (e.g., supervisor vs user) used by the simplified path.
   void read(void* data, uint64_t addr, uint32_t size, bool sup);
   void write(const void* data, uint64_t addr, uint32_t size, bool sup);
 #endif
@@ -250,6 +262,8 @@ private:
     void map(uint64_t start, uint64_t end, MemDevice &md);
 
   private:
+    // Simple address decoder that locates which MemDevice serves a given
+    // physical address range and computes the device-local offset.
 
     struct mem_accessor_t {
       MemDevice*  md;
@@ -276,6 +290,7 @@ private:
       , mru_bit(true)
       , size_bits (size_bits)
     {
+      // Decode permission bits for convenience (v/r/w/x/u/...)
       d = bit(7);
       a = bit(6);
       g = bit(5);
@@ -328,6 +343,7 @@ private:
 #endif
 
   amo_reservation_t amo_reservation_;
+  // LR/SC reservation state: holds last reserved physical address and validity.
 #ifdef VM_ENABLE
   std::unordered_set<uint64_t> unique_translations;
   uint64_t TLB_HIT, TLB_MISS, TLB_EVICT, PTW, PERF_UNIQUE_PTW;

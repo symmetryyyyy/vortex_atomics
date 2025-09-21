@@ -55,6 +55,8 @@ RamMemDevice::RamMemDevice(uint64_t size, uint32_t wordSize)
 {}
 
 void RamMemDevice::read(void* data, uint64_t addr, uint64_t size) {
+  // Byte-wise copy from internal vector into caller buffer.
+  // Enforces word alignment and bounds according to wordSize_.
   auto addr_end = addr + size;
   if ((addr & (wordSize_-1))
    || (addr_end & (wordSize_-1))
@@ -70,6 +72,8 @@ void RamMemDevice::read(void* data, uint64_t addr, uint64_t size) {
 }
 
 void RamMemDevice::write(const void* data, uint64_t addr, uint64_t size) {
+  // Byte-wise copy from caller buffer into internal vector.
+  // Enforces word alignment and bounds according to wordSize_.
   auto addr_end = addr + size;
   if ((addr & (wordSize_-1))
    || (addr_end & (wordSize_-1))
@@ -94,6 +98,7 @@ void RomMemDevice::write(const void* /*data*/, uint64_t /*addr*/, uint64_t /*siz
 ///////////////////////////////////////////////////////////////////////////////
 
 bool MemoryUnit::ADecoder::lookup(uint64_t addr, uint32_t wordSize, mem_accessor_t* ma) {
+  // Locate the MemDevice that covers the requested range and compute device-local address
   uint64_t end = addr + (wordSize - 1);
   assert(end >= addr);
   for (auto iter = entries_.rbegin(), iterE = entries_.rend(); iter != iterE; ++iter) {
@@ -107,6 +112,7 @@ bool MemoryUnit::ADecoder::lookup(uint64_t addr, uint32_t wordSize, mem_accessor
 }
 
 void MemoryUnit::ADecoder::map(uint64_t start, uint64_t end, MemDevice &md) {
+  // Register mapping: [start, end] -> md
   assert(end >= start);
   entry_t entry{&md, start, end};
   entries_.emplace_back(entry);
@@ -154,6 +160,7 @@ MemoryUnit::MemoryUnit(uint64_t pageSize)
 #endif
 
 void MemoryUnit::attach(MemDevice &m, uint64_t start, uint64_t end) {
+  // Expose device m over physical interval [start, end]
   decoder_.map(start, end, m);
 }
 
@@ -250,6 +257,7 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
 
 #ifdef VM_ENABLE
 void MemoryUnit::read(void* data, uint64_t addr, uint32_t size, ACCESS_TYPE type) {
+  // VM-enabled: translate VA->PA then delegate to ADecoder.
   DBGPRINT("  [MMU:read] 0x%lx, 0x%x, %u\n",addr,size,type);
   uint64_t pAddr;
   pAddr = vAddr_to_pAddr(addr, type);
@@ -257,12 +265,14 @@ void MemoryUnit::read(void* data, uint64_t addr, uint32_t size, ACCESS_TYPE type
 }
 #else
 void MemoryUnit::read(void* data, uint64_t addr, uint32_t size, bool sup) {
+  // VM-disabled: optional lightweight translation via TLB/table, or pass-through.
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
   return decoder_.read(data, pAddr, size);
 }
 #endif
 #ifdef VM_ENABLE
 void MemoryUnit::write(const void* data, uint64_t addr, uint32_t size, ACCESS_TYPE type) {
+  // VM-enabled: translate and store; any store clears AMO reservation.
   DBGPRINT("  [MMU:Write] 0x%lx, 0x%x, %u\n",addr,size,type);
   uint64_t pAddr;
   pAddr = vAddr_to_pAddr(addr, type);
@@ -271,6 +281,7 @@ void MemoryUnit::write(const void* data, uint64_t addr, uint32_t size, ACCESS_TY
 }
 #else
 void MemoryUnit::write(const void* data, uint64_t addr, uint32_t size, bool sup) {
+  // VM-disabled: translate and store; any store clears AMO reservation.
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 16 : 1);
   decoder_.write(data, pAddr, size);
   amo_reservation_.valid = false;
@@ -279,6 +290,7 @@ void MemoryUnit::write(const void* data, uint64_t addr, uint32_t size, bool sup)
 
 #ifdef VM_ENABLE
 void MemoryUnit::amo_reserve(uint64_t addr) {
+  // LR semantics: record reservation on physical address
   DBGPRINT("  [MMU:amo_reserve] 0x%lx\n",addr);
   uint64_t pAddr = this->vAddr_to_pAddr(addr,ACCESS_TYPE::LOAD);
   amo_reservation_.addr = pAddr;
@@ -294,6 +306,7 @@ void MemoryUnit::amo_reserve(uint64_t addr) {
 
 #ifdef VM_ENABLE
 bool MemoryUnit::amo_check(uint64_t addr) {
+  // SC semantics: succeed iff reservation is valid and address matches
   DBGPRINT("  [MMU:amo_check] 0x%lx\n",addr);
   uint64_t pAddr = this->vAddr_to_pAddr(addr, ACCESS_TYPE::LOAD);
   return amo_reservation_.valid && (amo_reservation_.addr == pAddr);
@@ -310,6 +323,7 @@ bool MemoryUnit::amo_check(uint64_t addr) {
 
 void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint64_t size_bits) {
   // HW: evict TLB by Most Recently Used
+  // TLB insert with MRU-based eviction bookkeeping.
   if (tlb_.size() == TLB_SIZE - 1) {
     for (auto& entry : tlb_)
     {
@@ -448,6 +462,8 @@ uint64_t RAM::size() const {
 }
 
 uint8_t *RAM::get(uint64_t address) const {
+  // Map an address to a page, allocating on demand. Maintains a small
+  // single-entry cache (last_page_) to exploit temporal locality.
   if (capacity_ != 0 && address >= capacity_) {
     throw OutOfRange();
   }
@@ -479,6 +495,7 @@ uint8_t *RAM::get(uint64_t address) const {
 }
 
 void RAM::read(void* data, uint64_t addr, uint64_t size) {
+  // Optional ACL enforcement, then copy out bytes from RAM pages.
   // printf("====%s (addr= 0x%lx, size= 0x%lx) ====\n", __PRETTY_FUNCTION__,addr,size);
   if (check_acl_ && acl_mngr_.check(addr, size, 0x1) == false) {
     throw BadAddress();
@@ -490,6 +507,7 @@ void RAM::read(void* data, uint64_t addr, uint64_t size) {
 }
 
 void RAM::write(const void* data, uint64_t addr, uint64_t size) {
+  // Optional ACL enforcement, then copy in bytes into RAM pages.
   if (check_acl_ && acl_mngr_.check(addr, size, 0x2) == false) {
     throw BadAddress();
   }
@@ -647,7 +665,8 @@ bool MemoryUnit::need_trans(uint64_t dev_pAddr)
 
 uint64_t MemoryUnit::vAddr_to_pAddr(uint64_t vAddr, ACCESS_TYPE type)
 {
-    uint64_t pfn;
+  // Resolve virtual address via TLB; on miss, perform page-table walk.
+  uint64_t pfn;
     uint64_t size_bits;
     DBGPRINT("  [MMU: V2P] vaddr = 0x%lx, type = 0x%u\n",vAddr,type);
     if (!need_trans(vAddr))
