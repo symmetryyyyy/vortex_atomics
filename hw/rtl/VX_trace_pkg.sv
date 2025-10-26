@@ -92,6 +92,9 @@ package VX_trace_pkg;
                         end else begin
                             case (INST_ALU_BITS'(op_type))
                                 INST_ALU_ADD:   `TRACE(level, ("ADD"))
+                                // add trace for DOT8
+                                INST_ALU_DOT8:  `TRACE(level, ("DOT8"))
+
                                 INST_ALU_SUB:   `TRACE(level, ("SUB"))
                                 INST_ALU_SLL:   `TRACE(level, ("SLL"))
                                 INST_ALU_SRL:   `TRACE(level, ("SRL"))

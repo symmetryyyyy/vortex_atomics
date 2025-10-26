@@ -18,6 +18,8 @@
 namespace vortex {
 
 enum class Opcode : uint8_t {
+  // add CUSTOM0 for dot8 experiment:
+  // CUSTOM0   = 0b0001011, // 0x0B
   NONE      = 0b0000000,
   R         = 0b0110011,
   L         = 0b0000011,
@@ -45,7 +47,7 @@ enum class Opcode : uint8_t {
   // Vector Extension
   VSET      = 0b1010111,
   // Custom Extensions
-  EXT1      = 0b0001011,
+  EXT1      = 0b0001011, // oh, it already existed ...
   EXT2      = 0b0101011,
   EXT3      = 0b1011011,
   EXT4      = 0b1111011

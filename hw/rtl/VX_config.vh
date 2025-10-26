@@ -428,6 +428,11 @@
 `define FPUQ_SIZE (2 * (`SIMD_WIDTH / `NUM_FPU_LANES))
 `endif
 
+// DOT8 Latency
+`ifndef LATENCY_DOT8
+`define LATENCY_DOT8 2
+`endif
+
 // FNCP Latency
 `ifndef LATENCY_FNCP
 `define LATENCY_FNCP 2

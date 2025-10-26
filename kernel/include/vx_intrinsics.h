@@ -96,6 +96,15 @@ extern "C" {
         __asm__ __volatile__ ("csrc %0, %1"	:: "i" (csr), "r" (__v)); \
 })
 
+// DOT8 for assignment 5
+inline int vx_dot8(int a, int b) {
+  size_t ret;
+  // R type using 3 registers: .insn r opcode7, funct3, funct7, rd, rs1, rs2
+  // R type with 4 registers: .insn r opcode7, funct3, funct2, rd, rs1, rs2, rs3
+  __asm__ volatile (".insn r %1, 0, 3, %0, %2, %3" : "=r"(ret) : "i"(RISCV_CUSTOM0), "r"(a), "r"(b));
+  return ret;
+}
+
 // Set thread mask
 inline void vx_tmc(int thread_mask) {
     __asm__ volatile (".insn r %0, 0, 0, x0, %1, x0" :: "i"(RISCV_CUSTOM0), "r"(thread_mask));
