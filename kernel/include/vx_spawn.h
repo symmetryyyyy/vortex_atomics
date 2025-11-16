@@ -45,8 +45,17 @@ typedef void (*vx_serial_cb)(void *arg);
 #define __local_mem(size) \
   (void*)((int8_t*)csr_read(VX_CSR_LOCAL_MEM_BASE) + __local_group_id * size)
 
+// Synchronous barrier: blocks until all warps in the CTA arrive
 #define __syncthreads() \
   vx_barrier(__local_group_id, __warps_per_group)
+
+// Asynchronous barrier arrive: non-blocking, marks arrival
+#define __syncthreads_arrive() \
+  vx_barrier_arrive(__local_group_id, __warps_per_group)
+
+// Asynchronous barrier wait: blocks until all warps have arrived
+#define __syncthreads_wait() \
+  vx_barrier_wait(__local_group_id, __warps_per_group)
 
 // launch a kernel function with a grid of blocks and block of threads
 int vx_spawn_threads(uint32_t dimension,

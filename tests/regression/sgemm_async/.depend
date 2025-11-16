@@ -1,0 +1,4 @@
+main.o: /home/chengxuan99/vortex/tests/regression/sgemm2/main.cpp \
+ /home/chengxuan99/vortex/runtime/include/vortex.h \
+ /home/chengxuan99/vortex/hw/VX_config.h \
+ /home/chengxuan99/vortex/tests/regression/sgemm2/common.h

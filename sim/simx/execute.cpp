@@ -1398,6 +1398,15 @@ instr_trace_t* Emulator::execute(const Instr &instr, uint32_t wid) {
         trace->fetch_stall = true;
         trace->data = std::make_shared<SfuTraceData>(rs1_data[thread_last].i, rs2_data[thread_last].i);
       } break;
+      case WctlType::BAR_ARRIVE: {
+        // Asynchronous arrive - non-blocking, prepare trace data
+        trace->data = std::make_shared<SfuTraceData>(rs1_data[thread_last].u, rs2_data[thread_last].u);
+      } break;
+      case WctlType::BAR_WAIT: {
+        // Asynchronous wait - blocking if not all arrived
+        trace->fetch_stall = true;
+        trace->data = std::make_shared<SfuTraceData>(rs1_data[thread_last].u, rs2_data[thread_last].u);
+      } break;
       case WctlType::PRED: {
         trace->fetch_stall = true;
         ThreadMask pred(num_threads);

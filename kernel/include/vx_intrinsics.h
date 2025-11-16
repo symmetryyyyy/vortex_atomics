@@ -290,6 +290,77 @@ inline __attribute__((const)) int vx_shfl_idx(size_t value, int bval, int cval, 
     return ret;
 }
 
+// extern __thread uint32_t __local_group_id;
+// extern uint32_t __warps_per_group;
+
+// inline uint32_t vx_cta_local_warp_id() {
+//     uint32_t warp_id = vx_warp_id();
+//     uint32_t local_group_id = __local_group_id;
+//     uint32_t warps_per_group = __warps_per_group;
+//     return warp_id - (local_group_id * warps_per_group);
+// }
+
+// inline uint32_t vx_is_cta_master_warp() {
+//     return (vx_cta_local_warp_id() == 0);
+// }
+
+// inline void vx_tma_load_2d_cta(void* dst_smem, const void* map_ptr, uint32_t tile_x, uint32_t tile_y) {
+//     if (vx_is_cta_master_warp()) {
+//         register uint32_t r_dst_smem __asm__("t0") = (uint32_t)(uintptr_t)dst_smem;
+//         register uint32_t r_map_ptr  __asm__("t1") = (uint32_t)(uintptr_t)map_ptr;
+//         register uint32_t r_tile_x   __asm__("t2") = tile_x;
+//         register uint32_t r_tile_y   __asm__("t3") = tile_y;
+        
+//         __asm__ volatile (
+//             ".insn r %[insn], 0, 3, x0, %[dst], %[map]"
+//             :: [insn]"i"(RISCV_CUSTOM0),
+//                [dst]"r"(r_dst_smem),
+//                [map]"r"(r_map_ptr),
+//                "r"(r_tile_x),
+//                "r"(r_tile_y)
+//             : "memory"
+//         );
+//     }
+// }
+
+// inline void vx_tma_store_2d_cta(const void* map_ptr, uint32_t tile_x, uint32_t tile_y, const void* src_smem) {
+//     if (vx_is_cta_master_warp()) {
+//         register uint32_t r_map_ptr  __asm__("t0") = (uint32_t)(uintptr_t)map_ptr;
+//         register uint32_t r_src_smem __asm__("t1") = (uint32_t)(uintptr_t)src_smem;
+//         register uint32_t r_tile_x   __asm__("t2") = tile_x;
+//         register uint32_t r_tile_y   __asm__("t3") = tile_y;
+        
+//         __asm__ volatile (
+//             ".insn r %[insn], 1, 3, x0, %[map], %[src]"
+//             :: [insn]"i"(RISCV_CUSTOM0),
+//                [map]"r"(r_map_ptr),
+//                [src]"r"(r_src_smem),
+//                "r"(r_tile_x),
+//                "r"(r_tile_y)
+//             : "memory"
+//         );
+//     }
+// }
+
+inline void vx_barrier_arrive(int barrier_id, int num_warps) {
+    __asm__ volatile (
+        ".insn r %0, 6, 0, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
+        : "memory"
+    );
+}
+
+// Async Barrier Wait: wait the warps
+// barrier_id: barrier ID (0-7)
+inline void vx_barrier_wait(int barrier_id, int num_warps) {
+    __asm__ volatile (
+        ".insn r %0, 7, 0, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
+        : "memory"
+    );
+}
+
+
 #ifdef __cplusplus
 }
 #endif

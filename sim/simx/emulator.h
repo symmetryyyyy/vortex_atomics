@@ -100,6 +100,10 @@ public:
 
   bool barrier(uint32_t bar_id, uint32_t count, uint32_t wid);
 
+  void barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid);
+
+  bool barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid);
+
   bool wspawn(uint32_t num_warps, Word nextPC);
 
   int get_exitcode() const;
@@ -154,6 +158,30 @@ private:
   uint32_t    ipdom_size_;
   Word        csr_mscratch_;
   wspawn_t    wspawn_;
+
+  struct AsyncBarrier {
+    WarpMask arrived_mask;   // Warps that have called arrive()
+    WarpMask waiting_mask;   // Warps that are blocked in wait()
+    WarpMask wait_done_mask; // Warps that have completed wait()
+
+    uint32_t arrived_count;
+    uint32_t expect_count;
+
+    uint32_t generation;
+
+    AsyncBarrier() : arrived_count(0), expect_count(0), generation(0) {}
+
+    void reset() {
+      arrived_mask.reset();
+      waiting_mask.reset();
+      wait_done_mask.reset();
+      arrived_count = 0;
+    }
+  };
+
+  std::vector<AsyncBarrier> async_barriers_;
+
+
 
 #ifdef EXT_TCU_ENABLE
   TensorUnit::Ptr tensor_unit_;

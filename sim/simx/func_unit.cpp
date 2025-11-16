@@ -380,6 +380,21 @@ void SfuUnit::tick() {
 					release_warp = core_->barrier(trace_data->arg1, trace_data->arg2, trace->wid);
 				}
 			} break;
+			case WctlType::BAR_ARRIVE: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					core_->barrier_arrive(trace_data->arg1, trace_data->arg2, trace->wid);
+					// Arrive is non-blocking, never releases warp
+				}
+			} break;
+			case WctlType::BAR_WAIT: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					release_warp = core_->barrier_wait(trace_data->arg1, trace_data->arg2, trace->wid);
+				}
+			} break;
 			default:
 				std::abort();
 			}

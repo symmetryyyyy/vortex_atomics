@@ -369,6 +369,8 @@ static op_string_t op_string(const Instr &instr) {
       case WctlType::JOIN:   return {"JOIN", ""};
       case WctlType::BAR:    return {"BAR", ""};
       case WctlType::PRED:   return {wctlArgs.is_neg ? "PRED.N":"PRED", ""};
+      case WctlType::BAR_ARRIVE: return {"BAR_ARRIVE", ""};
+      case WctlType::BAR_WAIT:   return {"BAR_WAIT", ""};
       default:
         std::abort();
       }
@@ -1033,6 +1035,16 @@ void Emulator::decode(uint32_t code, uint32_t wid, uint64_t uuid) {
         instr->setSrcReg(0, rs1, RegType::Integer);
         instr->setSrcReg(1, rs2, RegType::Integer);
         wctlArgs.is_neg = (rd != 0);
+        break;
+      case 6: // BAR_ARRIVE
+        instr->setOpType(WctlType::BAR_ARRIVE);
+        instr->setSrcReg(0, rs1, RegType::Integer); // barrier_id
+        instr->setSrcReg(1, rs2, RegType::Integer); // num_warps
+        break;
+      case 7: // BAR_WAIT
+        instr->setOpType(WctlType::BAR_WAIT);
+        instr->setSrcReg(0, rs1, RegType::Integer); // barrier_id
+        instr->setSrcReg(1, rs2, RegType::Integer); // num_warps
         break;
       default:
         std::abort();

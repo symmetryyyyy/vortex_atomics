@@ -458,6 +458,14 @@ bool Core::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
   return emulator_.barrier(bar_id, count, wid);
 }
 
+void Core::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
+  emulator_.barrier_arrive(bar_id, count, wid);
+}
+
+bool Core::barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid) {
+  return emulator_.barrier_wait(bar_id, count, wid);
+}
+
 bool Core::wspawn(uint32_t num_warps, Word nextPC) {
   return emulator_.wspawn(num_warps, nextPC);
 }
