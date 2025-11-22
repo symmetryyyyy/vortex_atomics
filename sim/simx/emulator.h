@@ -162,20 +162,12 @@ private:
   struct AsyncBarrier {
     WarpMask arrived_mask;   // Warps that have called arrive()
     WarpMask waiting_mask;   // Warps that are blocked in wait()
-    WarpMask wait_done_mask; // Warps that have completed wait()
 
-    uint32_t arrived_count;
-    uint32_t expect_count;
-
-    uint32_t generation;
-
-    AsyncBarrier() : arrived_count(0), expect_count(0), generation(0) {}
+    AsyncBarrier() {}
 
     void reset() {
       arrived_mask.reset();
       waiting_mask.reset();
-      wait_done_mask.reset();
-      arrived_count = 0;
     }
   };
 
