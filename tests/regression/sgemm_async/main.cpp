@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
   uint32_t size_sq = size * size;
   uint32_t buf_size = size_sq * sizeof(TYPE);
   uint32_t group_size = tile_size * tile_size;
-  uint32_t local_mem = 2 * group_size * sizeof(TYPE);
+  uint32_t local_mem = 4 * group_size * sizeof(TYPE);
 
   std::cout << "data type: " << Comparator<TYPE>::type_str() << std::endl;
   std::cout << "matrix size: " << size << "x" << size << std::endl;

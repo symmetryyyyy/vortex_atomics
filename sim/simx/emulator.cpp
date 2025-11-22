@@ -115,7 +115,7 @@ void Emulator::reset() {
   }
 
   for (auto& async_bar : async_barriers_) {
-    async_bar.reset();
+    async_bar.reset_for_next_gen();
   }
 
 #ifdef EXT_V_ENABLE
@@ -255,6 +255,7 @@ bool Emulator::wspawn(uint32_t num_warps, Word nextPC) {
 bool Emulator::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
   if (count < 2)
     return true;
+  
 
   uint32_t bar_idx = bar_id & 0x7fffffff;
   bool is_global = (bar_id >> 31);
@@ -262,6 +263,12 @@ bool Emulator::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
   auto& barrier = barriers_.at(bar_idx);
   barrier.set(wid);
   DP(3, "*** Suspend core #" << core_->id() << ", warp #" << wid << " at barrier #" << bar_idx);
+
+  std::cout << "[SYNC] core=" << core_->id()
+          << " wid=" << wid
+          << " bar_id=0x" << std::hex << bar_id
+          << " is_global=" << is_global
+          << std::dec << std::endl;
 
   if (is_global) {
     // global barrier handling
@@ -285,112 +292,147 @@ bool Emulator::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
   return false;
 }
 
-// Asynchronous barrier arrive (non-blocking)
+// // Asynchronous barrier arrive (non-blocking)
+
 void Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
-  if (count < 2)
-    return;
+    bool is_cluster = (bar_id >> 31);
+    uint32_t bar_idx = bar_id & 0x7fffffff;
 
-  uint32_t bar_idx = bar_id & 0x7fffffff;
-  auto& async_bar = async_barriers_.at(bar_idx);
-
-  // Check if this warp already arrived in current generation (duplicate arrive)
-  if (async_bar.arrived_mask.test(wid)) {
-    DP(3, "*** Async arrive: warp #" << wid << " already arrived at gen=" 
-       << async_bar.generation << ", ignoring duplicate");
-    return;
-  }
-
-  // Mark this warp as arrived
-  async_bar.arrived_mask.set(wid);
-  async_bar.arrived_count++;
-  
-  DP(3, "*** Async arrive: core #" << core_->id() << ", warp #" << wid 
-     << " at barrier #" << bar_idx << ", count=" << async_bar.arrived_count 
-     << "/" << count << ", gen=" << async_bar.generation);
-
-  // Check if all expected warps have arrived
-  if (async_bar.arrived_count >= count) {
-    DP(3, "*** Async barrier #" << bar_idx << " all arrived, releasing "
-       << async_bar.waiting_mask.count() << " waiting warps");
-    
-    // Release all warps waiting on this barrier
-    for (uint32_t i = 0; i < arch_.num_warps(); ++i) {
-      if (async_bar.waiting_mask.test(i)) {
-        DP(3, "*** Resume core #" << core_->id() << ", warp #" << i 
-           << " at async barrier #" << bar_idx);
-        stalled_warps_.reset(i);
-      }
+    if (is_cluster) {
+        // cluster-level implementation, prolly not needed
+        core_->socket()->async_barrier_arrive(bar_idx, count, core_->id());
+        return;
     }
-    
-    // Clear waiting_mask only
-    // Do NOT clear arrived_mask here - wait() needs it to verify warps have called arrive
-    async_bar.waiting_mask.reset();
-  }
+
+    auto& b = async_barriers_.at(bar_idx);
+
+    // record expect_count to prevent different carrying different count (should be redundant)
+    if (b.expect_count == 0) {
+        b.expect_count = count;
+    }
+
+    std::cout << "[ARRIVE] warp=" << wid
+              << " gen =" << b.generation
+              << " expect =" << b.expect_count
+              << " arrived_count =" << b.arrived_count
+              << " arrived_mask =" << b.arrived_mask
+              << std::endl;
+
+    // If arrived in the same generation before, skip
+    if (b.arrived_mask.test(wid)) {
+        std::cout << "  >> ARRIVE_DUP warp=" << wid << " (already arrived this gen)\n";
+        return;
+    }
+
+    // record the arrival
+    b.arrived_mask.set(wid);
+    ++b.arrived_count;
+
+    std::cout << " [ARRIVE_UPDATE] warp=" << wid
+              << " arrived_count=" << b.arrived_count
+              << " arrived_mask=" << b.arrived_mask
+              << std::endl;
+
+    // If all warps arrived, update the generation
+    if (b.arrived_count == b.expect_count) {
+        uint32_t new_gen = b.generation + 1;
+
+        std::cout << " [GENERATION COMPLETE]: gen="
+                  << b.generation << " -> " << new_gen << std::endl;
+
+        b.generation = new_gen;
+        b.arrived_count = 0;
+        b.arrived_mask.reset();
+
+        // wake all waited
+        for (uint32_t w = 0; w < arch_.num_warps(); ++w) {
+            if (b.waiting_mask.test(w)) {
+                if (b.wait_phase[w] < b.generation) {
+                    std::cout << "  [WAKE warp] =" << w
+                              << " now_gen =" << b.generation
+                              << " last_done =" << b.wait_phase[w]
+                              << std::endl;
+                    // If generation end, update the wait_phase of all arrived warps
+                    // If haven't reached the next wait, just pass through it
+                    b.wait_phase[w] = b.generation;
+                    b.waiting_mask.reset(w);
+                    stalled_warps_.reset(w);
+                }
+            }
+        }
+    }
 }
 
-// Asynchronous barrier wait (blocking if not all arrived)
+
 bool Emulator::barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid) {
-  if (count < 2)
-    return true;
+    bool is_cluster = (bar_id >> 31);
+    uint32_t bar_idx = bar_id & 0x7fffffff;
 
-  uint32_t bar_idx = bar_id & 0x7fffffff;
-  auto& async_bar = async_barriers_.at(bar_idx);
-
-  DP(3, "*** Async wait: warp #" << wid << " at barrier #" << bar_idx 
-     << ", gen=" << async_bar.generation << ", arrived=" << async_bar.arrived_count << "/" << count);
-
-  // Check if this warp has called arrive for current generation
-  if (!async_bar.arrived_mask.test(wid)) {
-    // This warp hasn't arrived yet - wait for arrive
-    // This can happen if wait is called before arrive in the same cycle
-    DP(3, "*** Async wait: warp #" << wid << " waiting for arrive at barrier #" << bar_idx);
-    
-    // Stall this warp - it will retry wait after other warps make progress
-    if (!async_bar.waiting_mask.test(wid)) {
-      async_bar.waiting_mask.set(wid);
-      stalled_warps_.set(wid);
+    if (is_cluster) {
+        bool ok = core_->socket()->async_barrier_wait(bar_idx, count, core_->id());
+        if (!ok) {
+            stalled_warps_.set(wid);
+            return false;
+        }
+        stalled_warps_.reset(wid);
+        return true;
     }
-    return false;  // Block this warp
-  }
 
-  // Check if all warps have arrived
-  if (async_bar.arrived_count < count) {
-    // Not all warps arrived yet, need to wait
-    // Only stall if not already waiting (avoid duplicate stall on re-execution)
-    if (!async_bar.waiting_mask.test(wid)) {
-      DP(3, "*** Async wait: stalling warp #" << wid 
-         << " at barrier #" << bar_idx << " (" << async_bar.arrived_count 
-         << "/" << count << " arrived)");
-      async_bar.waiting_mask.set(wid);
-      stalled_warps_.set(wid);  // Actually stall the warp
+    auto& b = async_barriers_.at(bar_idx);
+
+    if (b.expect_count == 0) {
+        b.expect_count = count;
     }
-    return false;  // Block this warp
-  }
 
-  // All warps have arrived, this warp can proceed
-  DP(3, "*** Async wait: warp #" << wid 
-     << " at barrier #" << bar_idx << " - passing through");
-  
-  // Mark this warp as having completed wait for this generation
-  async_bar.wait_done_mask.set(wid);
-  
-  // Check if all warps have completed wait - if so, reset for next generation
-  if (async_bar.wait_done_mask.count() == (size_t)count) {
-    DP(3, "*** Async barrier #" << bar_idx << " fully complete, resetting");
-    
-    // Reset all barrier state for next usage
-    async_bar.arrived_mask.reset();
-    async_bar.waiting_mask.reset();  // Clear waiting mask as well
-    async_bar.wait_done_mask.reset();
-    async_bar.arrived_count = 0;
-    
-    // Always reset generation to 0 after complete cycle
-    // This allows different blocks to reuse the same barrier_id
-    async_bar.generation = 0;
-  }
-  
-  return true;  // Can proceed immediately
+    std::cout << "[WAIT] warp=" << wid
+              << " gen=" << b.generation
+              << " expect=" << b.expect_count
+              << " arrived_count=" << b.arrived_count
+              << " arrived_mask=" << b.arrived_mask
+              << " waiting_mask=" << b.waiting_mask
+              << std::endl;
+
+    // If no longer need to wait for the current gen (all arrived), just skip, otherwise wait
+    uint32_t desired_gen = b.wait_phase[wid] + 1;
+
+    std::cout << " [WAIT TARGET] warp=" << wid
+              << " wants gen=" << desired_gen
+              << " (last_done=" << b.wait_phase[wid] << ")\n";
+
+    if (b.generation >= desired_gen) {
+        std::cout << "[WAIT_DONE] warp=" << wid
+                  << " reaches gen=" << b.generation
+                  << " (desired=" << desired_gen << ")"
+                  << std::endl;
+
+        b.wait_phase[wid] = b.generation;
+        b.waiting_mask.reset(wid);
+        stalled_warps_.reset(wid);
+
+        std::cout << "waiting_mask(after pass)="
+                  << b.waiting_mask
+                  << std::endl;
+
+        return true;
+    }
+
+    // Not reached, wait
+    std::cout << "  warp " << wid
+              << " waiting for gen " << desired_gen
+              << " (current gen=" << b.generation << ")"
+              << std::endl;
+
+    b.waiting_mask.set(wid);
+    stalled_warps_.set(wid);
+
+    std::cout << "waiting_mask(after stall)="
+              << b.waiting_mask
+              << std::endl;
+
+    return false;
 }
+
+
 
 
 #ifdef VM_ENABLE

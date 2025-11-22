@@ -158,28 +158,41 @@ private:
   uint32_t    ipdom_size_;
   Word        csr_mscratch_;
   wspawn_t    wspawn_;
+  //** */
 
   struct AsyncBarrier {
-    WarpMask arrived_mask;   // Warps that have called arrive()
-    WarpMask waiting_mask;   // Warps that are blocked in wait()
-    WarpMask wait_done_mask; // Warps that have completed wait()
+    #define MAX_WARPS 32
 
+    WarpMask arrived_mask;
+    WarpMask waiting_mask;
     uint32_t arrived_count;
     uint32_t expect_count;
-
     uint32_t generation;
+    
+    std::array<uint32_t, MAX_WARPS> wait_phase;
 
-    AsyncBarrier() : arrived_count(0), expect_count(0), generation(0) {}
-
-    void reset() {
-      arrived_mask.reset();
-      waiting_mask.reset();
-      wait_done_mask.reset();
-      arrived_count = 0;
+    AsyncBarrier()
+        : arrived_count(0)
+        , expect_count(0)
+        , generation(0)
+    {
+        arrived_mask.reset();
+        waiting_mask.reset();
+        wait_phase.fill(0);
     }
-  };
 
-  std::vector<AsyncBarrier> async_barriers_;
+    void reset_for_next_gen() {
+        arrived_mask.reset();
+        waiting_mask.reset();
+        arrived_count = 0;
+        generation = 0;
+        expect_count = 0;
+        wait_phase.fill(0);
+    }
+};
+
+
+std::vector<AsyncBarrier> async_barriers_;
 
 
 
