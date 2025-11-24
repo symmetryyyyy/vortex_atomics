@@ -32,37 +32,69 @@ void kernel_body(kernel_arg_t *arg) {
 
   TYPE sum(0);
 
-  // 
-  local_A0[l_row * tile_size + l_col] = A_ptr[g_row * size + l_col];
-  local_B0[l_row * tile_size + l_col] = B_ptr[l_row * size + g_col];
-  vx_barrier_arrive(0, num_warps);  // barrier 0 for buffer 0
+  // Barrier IDs
+  // We need two barriers: one for "Load Done" and one for "Compute Done"
+  // Since we are double buffering, we can conceptually think of them as:
+  // bar_load: signals that a buffer is filled and ready for compute
+  // bar_compute: signals that a buffer is consumed and ready for refill
+  // To avoid race conditions, we use separate barrier IDs.
+  // Assuming we have enough hardware barriers, we map them based on local group ID.
+  // bar_load: used to wait for data loading
+  // bar_compute: used to wait for computation completion before overwriting
+  int bar_load = __local_group_id * 2;
+  int bar_compute = __local_group_id * 2 + 1;
+
+  // Prologue: Load the first tile (Buffer 0)
+  if (0 < size) {
+      local_A0[l_row * tile_size + l_col] = A_ptr[g_row * size + (0 + l_col)];
+      local_B0[l_row * tile_size + l_col] = B_ptr[(0 + l_row) * size + g_col];
+  }
+  // Wait for Buffer 0 to be loaded. 
+  // We use a full barrier here because it's the first step.
+  vx_barrier(bar_load, num_warps);
 
   // Main loop with double buffering
   for (uint32_t k = 0; k < size; k += tile_size) {
     int buf_cur = (k / tile_size) % 2;       
     int buf_next = 1 - buf_cur;             
-    int barrier_cur = buf_cur;             
-    int barrier_next = buf_next;             
     
     auto cur_A = (buf_cur == 0) ? local_A0 : local_A1;
     auto cur_B = (buf_cur == 0) ? local_B0 : local_B1;
     auto next_A = (buf_next == 0) ? local_A0 : local_A1;
     auto next_B = (buf_next == 0) ? local_B0 : local_B1;
 
-    
-    vx_barrier_wait(barrier_cur, num_warps);
+    uint32_t next_k = k + tile_size;
 
-   
-    if (k + tile_size < size) {
-      next_A[l_row * tile_size + l_col] = A_ptr[g_row * size + (k + tile_size + l_col)];
-      next_B[l_row * tile_size + l_col] = B_ptr[(k + tile_size + l_row) * size + g_col];
+    // 1. Async Load Next Tile
+    if (next_k < size) {
+      // Wait for the previous computation on buf_next to finish before overwriting it.
+      // For the first iteration (k=0), buf_next (Buffer 1) is empty, so no wait needed.
+      if (k > 0) {
+        vx_barrier_wait(bar_compute, num_warps);
+      }
+
+      // Load data into buf_next
+      next_A[l_row * tile_size + l_col] = A_ptr[g_row * size + (next_k + l_col)];
+      next_B[l_row * tile_size + l_col] = B_ptr[(next_k + l_row) * size + g_col];
       
-      vx_barrier_arrive(barrier_next, num_warps);
+      // Signal that loading for buf_next is done (Arrive)
+      vx_barrier_arrive(bar_load, num_warps);
     }
 
-    
+    // 2. Compute Current Tile
+    // At this point, buf_cur is guaranteed to be ready (from Prologue or previous loop's Wait)
     for (uint32_t j = 0; j < tile_size; ++j) {
       sum += cur_A[l_row * tile_size + j] * cur_B[j * tile_size + l_col];
+    }
+
+    // Signal that computation on buf_cur is done (Arrive)
+    // This tells the loader it's safe to overwrite buf_cur in the next-next iteration
+    vx_barrier_arrive(bar_compute, num_warps);
+
+    // 3. Wait for Next Tile
+    // Before moving to the next iteration, we must ensure buf_next is fully loaded.
+    if (next_k < size) {
+      vx_barrier_wait(bar_load, num_warps);
     }
   }
 
