@@ -49,26 +49,72 @@ typedef void (*vx_serial_cb)(void *arg);
 #define __syncthreads() \
   vx_barrier(__local_group_id, __warps_per_group)
 
-// Asynchronous barrier arrive: non-blocking, marks arrival
+// Legacy macros for backward compatibility
 #define __syncthreads_arrive() \
   vx_barrier_arrive(__local_group_id, __warps_per_group)
 
-// Asynchronous barrier wait: blocks until all warps have arrived
-#define __syncthreads_wait() \
-  vx_barrier_wait(__local_group_id, __warps_per_group)
+#define __syncthreads_wait(token) \
+  vx_barrier_wait(__local_group_id, (token))
 
-// launch a kernel function with a grid of blocks and block of threads
+// C function declarations
 int vx_spawn_threads(uint32_t dimension,
                      const uint32_t* grid_dim,
                      const uint32_t* block_dim,
                      vx_kernel_func_cb kernel_func,
                      const void* arg);
 
-// function call serialization
 void vx_serial(vx_serial_cb callback, const void * arg);
 
 #ifdef __cplusplus
-}
-#endif
+}  // extern "C"
+
+//////////////////////////////////////////////////////////////////////////////
+// Simple CTA-level async barrier class
+//////////////////////////////////////////////////////////////////////////////
+
+// CTA-level async barrier
+// Usage:
+//   barrier bar;
+//   bar.init(num_warps);
+//   uint32_t token = bar.arrive();  // returns token (generation number)
+//   bar.wait(token);                // wait until generation > token
+class barrier {
+public:
+  // Constructor
+  barrier() {
+    bar_id_ = 0;
+    num_warps_ = 0;
+  }
+
+  // Initialize barrier with expected warp count
+  void init(uint32_t num_warps) {
+    bar_id_ = __local_group_id;
+    num_warps_ = num_warps;
+  }
+
+  // Arrive at barrier (non-blocking)
+  // Returns: token (current generation number)
+  uint32_t arrive() {
+    return vx_barrier_arrive(bar_id_, num_warps_);
+  }
+
+  // Wait for barrier phase to complete
+  // Blocks until generation > token
+  void wait(uint32_t token) {
+    vx_barrier_wait(bar_id_, token);
+  }
+
+  // Convenience: arrive and wait in one call
+  void arrive_and_wait() {
+    uint32_t token = arrive();
+    wait(token);
+  }
+
+private:
+  uint32_t bar_id_;
+  uint32_t num_warps_;
+};
+
+#endif  // __cplusplus
 
 #endif // __VX_SPAWN_H__

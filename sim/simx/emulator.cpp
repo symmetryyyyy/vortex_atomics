@@ -293,15 +293,16 @@ bool Emulator::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
 }
 
 // // Asynchronous barrier arrive (non-blocking)
+// Returns: token (current generation before potential increment)
 
-void Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
+uint32_t Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
     bool is_cluster = (bar_id >> 31);
     uint32_t bar_idx = bar_id & 0x7fffffff;
 
     if (is_cluster) {
         // cluster-level implementation, prolly not needed
         core_->socket()->async_barrier_arrive(bar_idx, count, core_->id());
-        return;
+        return 0; // cluster level doesn't use token
     }
 
     auto& b = async_barriers_.at(bar_idx);
@@ -311,17 +312,21 @@ void Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
         b.expect_count = count;
     }
 
+    // Capture current generation as token BEFORE any updates
+    uint32_t token = b.generation;
+
     std::cout << "[ARRIVE] warp=" << wid
               << " gen =" << b.generation
+              << " token=" << token
               << " expect =" << b.expect_count
               << " arrived_count =" << b.arrived_count
               << " arrived_mask =" << b.arrived_mask
               << std::endl;
 
-    // If arrived in the same generation before, skip
+    // If arrived in the same generation before, skip but still return token
     if (b.arrived_mask.test(wid)) {
         std::cout << "  >> ARRIVE_DUP warp=" << wid << " (already arrived this gen)\n";
-        return;
+        return token;
     }
 
     // record the arrival
@@ -344,32 +349,32 @@ void Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
         b.arrived_count = 0;
         b.arrived_mask.reset();
 
-        // wake all waited
+        // wake all warps waiting for this generation
         for (uint32_t w = 0; w < arch_.num_warps(); ++w) {
             if (b.waiting_mask.test(w)) {
-                if (b.wait_phase[w] < b.generation) {
-                    std::cout << "  [WAKE warp] =" << w
-                              << " now_gen =" << b.generation
-                              << " last_done =" << b.wait_phase[w]
-                              << std::endl;
-                    // If generation end, update the wait_phase of all arrived warps
-                    // If haven't reached the next wait, just pass through it
-                    b.wait_phase[w] = b.generation;
-                    b.waiting_mask.reset(w);
-                    stalled_warps_.reset(w);
-                }
+                // Check if this warp's token indicates it should wake up
+                // A warp waiting with token T should wake when generation > T
+                std::cout << "  [CHECK WAKE warp] =" << w
+                          << " now_gen =" << b.generation
+                          << std::endl;
+                b.waiting_mask.reset(w);
+                stalled_warps_.reset(w);
             }
         }
     }
+
+    return token;
 }
 
 
-bool Emulator::barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid) {
+// Async barrier wait: uses token to determine which generation to wait for
+// token: the value returned by barrier_arrive
+bool Emulator::barrier_wait(uint32_t bar_id, uint32_t token, uint32_t wid) {
     bool is_cluster = (bar_id >> 31);
     uint32_t bar_idx = bar_id & 0x7fffffff;
 
     if (is_cluster) {
-        bool ok = core_->socket()->async_barrier_wait(bar_idx, count, core_->id());
+        bool ok = core_->socket()->async_barrier_wait(bar_idx, token, core_->id());
         if (!ok) {
             stalled_warps_.set(wid);
             return false;
@@ -380,32 +385,25 @@ bool Emulator::barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid) {
 
     auto& b = async_barriers_.at(bar_idx);
 
-    if (b.expect_count == 0) {
-        b.expect_count = count;
-    }
+    // Calculate desired generation from token
+    // Token represents the generation when arrive() was called
+    // We need to wait until generation > token (i.e., that phase completed)
+    uint32_t desired_gen = token + 1;
 
     std::cout << "[WAIT] warp=" << wid
-              << " gen=" << b.generation
-              << " expect=" << b.expect_count
-              << " arrived_count=" << b.arrived_count
+              << " token=" << token
+              << " desired_gen=" << desired_gen
+              << " current_gen=" << b.generation
               << " arrived_mask=" << b.arrived_mask
               << " waiting_mask=" << b.waiting_mask
               << std::endl;
 
-    // If no longer need to wait for the current gen (all arrived), just skip, otherwise wait
-    uint32_t desired_gen = b.wait_phase[wid] + 1;
-
-    std::cout << " [WAIT TARGET] warp=" << wid
-              << " wants gen=" << desired_gen
-              << " (last_done=" << b.wait_phase[wid] << ")\n";
-
     if (b.generation >= desired_gen) {
         std::cout << "[WAIT_DONE] warp=" << wid
                   << " reaches gen=" << b.generation
-                  << " (desired=" << desired_gen << ")"
+                  << " (desired=" << desired_gen << ", token=" << token << ")"
                   << std::endl;
 
-        b.wait_phase[wid] = b.generation;
         b.waiting_mask.reset(wid);
         stalled_warps_.reset(wid);
 
@@ -419,7 +417,7 @@ bool Emulator::barrier_wait(uint32_t bar_id, uint32_t count, uint32_t wid) {
     // Not reached, wait
     std::cout << "  warp " << wid
               << " waiting for gen " << desired_gen
-              << " (current gen=" << b.generation << ")"
+              << " (current gen=" << b.generation << ", token=" << token << ")"
               << std::endl;
 
     b.waiting_mask.set(wid);

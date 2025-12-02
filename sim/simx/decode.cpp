@@ -1038,13 +1038,14 @@ void Emulator::decode(uint32_t code, uint32_t wid, uint64_t uuid) {
         break;
       case 6: // BAR_ARRIVE
         instr->setOpType(WctlType::BAR_ARRIVE);
+        instr->setDestReg(rd, RegType::Integer);   // token returned in rd
         instr->setSrcReg(0, rs1, RegType::Integer); // barrier_id
         instr->setSrcReg(1, rs2, RegType::Integer); // num_warps
         break;
       case 7: // BAR_WAIT
         instr->setOpType(WctlType::BAR_WAIT);
         instr->setSrcReg(0, rs1, RegType::Integer); // barrier_id
-        instr->setSrcReg(1, rs2, RegType::Integer); // num_warps
+        instr->setSrcReg(1, rs2, RegType::Integer); // token (was num_warps)
         break;
       default:
         std::abort();

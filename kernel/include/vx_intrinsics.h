@@ -342,20 +342,28 @@ inline __attribute__((const)) int vx_shfl_idx(size_t value, int bval, int cval, 
 //     }
 // }
 
-inline void vx_barrier_arrive(int barrier_id, int num_warps) {
+// Async Barrier Arrive: non-blocking, returns a token representing the current phase
+// barrier_id: barrier ID (0-7)
+// num_warps: number of warps participating in this barrier
+// Returns: token (current generation/phase) to be used with vx_barrier_wait
+inline uint32_t vx_barrier_arrive(int barrier_id, int num_warps) {
+    uint32_t token;
     __asm__ volatile (
-        ".insn r %0, 6, 0, x0, %1, %2"
-        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
+        ".insn r %1, 6, 0, %0, %2, %3"
+        : "=r"(token)
+        : "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
         : "memory"
     );
+    return token;
 }
 
-// Async Barrier Wait: wait the warps
+// Async Barrier Wait: blocks until the barrier phase associated with the token is complete
 // barrier_id: barrier ID (0-7)
-inline void vx_barrier_wait(int barrier_id, int num_warps) {
+// token: the token returned by vx_barrier_arrive
+inline void vx_barrier_wait(int barrier_id, uint32_t token) {
     __asm__ volatile (
         ".insn r %0, 7, 0, x0, %1, %2"
-        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(token)
         : "memory"
     );
 }
