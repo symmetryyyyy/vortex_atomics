@@ -1404,7 +1404,7 @@ instr_trace_t* Emulator::execute(const Instr &instr, uint32_t wid) {
         // Returns token (current generation) in rd
         uint32_t bar_id = rs1_data[thread_last].u;
         uint32_t count = rs2_data[thread_last].u;
-        uint32_t token = core_->barrier_arrive(bar_id, count, wid);
+        uint32_t token = this->barrier_arrive(bar_id, count, wid);
         // Write token to all active threads' destination register
         for (uint32_t t = thread_start; t < num_threads; ++t) {
           rd_data[t].u = token;
@@ -1417,10 +1417,10 @@ instr_trace_t* Emulator::execute(const Instr &instr, uint32_t wid) {
         // rs1 = barrier_id, rs2 = token (from previous arrive)
         uint32_t bar_id = rs1_data[thread_last].u;
         uint32_t token = rs2_data[thread_last].u;
-        bool ready = core_->barrier_wait(bar_id, token, wid);
-        if (!ready) {
-          trace->fetch_stall = true;  // Stall until barrier reaches next generation
-        }
+        // bool ready = this->barrier_wait(bar_id, token, wid);
+        // if (!ready) {
+        trace->fetch_stall = true;  // Stall until barrier reaches next generation
+        // }
         trace->data = std::make_shared<SfuTraceData>(bar_id, token);
       } break;
       case WctlType::PRED: {

@@ -40,8 +40,8 @@ void kernel_body(kernel_arg_t *arg) {
     TYPE my_val_b = local_B[l_row * tile_size + l_col];
 
     for (int iter = 0; iter < tile_size; ++iter) {
-      my_val = sqrt(my_val * my_val + 0.01f);
-      my_val_b = sqrt(my_val_b * my_val_b + 0.01f);
+      my_val = (sqrt(my_val * my_val + 0.01f));
+      my_val_b = (sqrt(my_val_b * my_val_b + 0.01f));
     }
     local_acc += my_val + my_val_b;
 
