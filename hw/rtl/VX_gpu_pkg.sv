@@ -382,6 +382,8 @@ package VX_gpu_pkg;
     localparam INST_SFU_CSRRW =  4'h6;
     localparam INST_SFU_CSRRS =  4'h7;
     localparam INST_SFU_CSRRC =  4'h8;
+    localparam INST_SFU_ARRIVE = 4'h9;
+    localparam INST_SFU_WAIT =   4'ha;
     localparam INST_SFU_BITS =   4;
 
     function automatic logic [3:0] inst_sfu_csr(input logic [2:0] funct3);
@@ -389,7 +391,7 @@ package VX_gpu_pkg;
     endfunction
 
     function automatic logic inst_sfu_is_wctl(input logic [INST_SFU_BITS-1:0] op);
-        return (op <= 5);
+        return (op <= 5) || (op == 9) || (op == 10);
     endfunction
 
     function automatic logic inst_sfu_is_csr(input logic [INST_SFU_BITS-1:0] op);
@@ -483,6 +485,17 @@ package VX_gpu_pkg;
     `endif
         logic                   is_noop;
     } barrier_t;
+
+    typedef struct packed {
+        logic                   valid;
+        // logic                   is_noop;
+        logic [NB_WIDTH-1:0]    id;
+        logic                   is_arrive;
+        logic [NW_WIDTH-1:0]    count;             
+        logic [`XLEN-1:0]       token;
+    } async_barrier_t;
+
+
 
     typedef struct packed {
         logic [`XLEN-1:0]   startup_addr;
