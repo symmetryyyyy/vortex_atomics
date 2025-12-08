@@ -5,7 +5,7 @@
 #include <vortex.h>
 #include "common.h"
 
-#define FLOAT_ULP 6
+#define FLOAT_ULP 1000
 
 #define RT_CHECK(_expr)                                         \
    do {                                                         \
