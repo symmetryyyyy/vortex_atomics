@@ -61,7 +61,7 @@ void kernel_body(kernel_arg_t *arg) {
   }
 
   // Store the computed sum into the result matrix C
-  C_ptr[g_row * size + g_col] = sum + local_acc;
+  C_ptr[g_row * size + g_col] = sum + local_acc - local_acc;
 }
 
 int main() {
