@@ -359,7 +359,7 @@ module VX_schedule import VX_gpu_pkg::*; #(
 
     // async barrier token output for ARRIVE instruction
     // Returns the current generation at time of arrive
-    assign warp_ctl_if.arrive_token = `XLEN'(async_bar_generation[warp_ctl_if.async_barrier.id]);
+    assign warp_ctl_if.arrive_token = `XLEN'(async_bar_generation[warp_ctl_if.async_bar_id_rd]);
 
     // split/join handling
 

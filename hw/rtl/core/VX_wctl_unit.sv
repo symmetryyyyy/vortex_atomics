@@ -168,7 +168,7 @@ module VX_wctl_unit import VX_gpu_pkg::*; #(
     // response
 
     assign warp_ctl_if.dvstack_wid = execute_if.data.wid;
-    // assign warp_ctl_if.async_bar_id_rd = rs1_data[NB_WIDTH-1:0];  // barrier ID for token lookup
+    assign warp_ctl_if.async_bar_id_rd = rs1_data[NB_WIDTH-1:0];  // barrier ID for token lookup
     
     wire [DV_STACK_SIZEW-1:0] dvstack_ptr;
     wire [`XLEN-1:0] arrive_token_out;

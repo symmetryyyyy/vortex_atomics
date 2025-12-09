@@ -30,7 +30,7 @@ interface VX_warp_ctl_if import VX_gpu_pkg::*; ();
     wire [DV_STACK_SIZEW-1:0] dvstack_ptr;
 
     // Async barrier token lookup
-    // wire [NB_WIDTH-1:0] async_bar_id_rd;   // barrier ID to read token from
+    wire [NB_WIDTH-1:0] async_bar_id_rd;   // barrier ID to read token from
     wire [`XLEN-1:0] arrive_token;      // current generation (token) returned
 
     modport master (
@@ -43,7 +43,7 @@ interface VX_warp_ctl_if import VX_gpu_pkg::*; ();
         output barrier,
         output async_barrier,
 
-        // output async_bar_id_rd,
+        output async_bar_id_rd,
         input  arrive_token,
 
         output dvstack_wid,
@@ -60,7 +60,7 @@ interface VX_warp_ctl_if import VX_gpu_pkg::*; ();
         input barrier,
         input async_barrier,
 
-        // input async_bar_id_rd,
+        input async_bar_id_rd,
         output arrive_token,
 
         input dvstack_wid,

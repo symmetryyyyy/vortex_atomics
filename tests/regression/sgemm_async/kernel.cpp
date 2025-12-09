@@ -32,14 +32,20 @@ void kernel_body(kernel_arg_t *arg) {
   bar.init(__warps_per_group);
   __syncthreads();
 
+  uint32_t token_load;
+  uint32_t token_compute;
+
   // Main loop
   for (uint32_t k = 0; k < size; k += tile_size) {
+    if (k > 0){
+      bar.wait(token_compute);  // Wait for previous compute to finish
+    }
     // Load tile to shared memory
     local_A0[l_row * tile_size + l_col] = A_ptr[g_row * size + (k + l_col)];
     local_B0[l_row * tile_size + l_col] = B_ptr[(k + l_row) * size + g_col];
 
     // Async arrive: non-blocking, returns token (generation number)
-    uint32_t token = bar.arrive();
+    token_load = bar.arrive();
     
     // Do independent work while waiting for other warps
     TYPE my_val = local_A0[l_row * tile_size + l_col];
@@ -52,12 +58,13 @@ void kernel_body(kernel_arg_t *arg) {
     local_acc += my_val + my_val_b;
 
     // Async wait: blocks until generation > token
-    bar.wait(token);
+    bar.wait(token_load);
 
     // Now safe to read from shared memory
     for (uint32_t j = 0; j < tile_size; ++j) {
       sum += local_A0[l_row * tile_size + j] * local_B0[j * tile_size + l_col];
     }
+    token_compute = bar.arrive();
   }
 
   // Store the computed sum into the result matrix C
