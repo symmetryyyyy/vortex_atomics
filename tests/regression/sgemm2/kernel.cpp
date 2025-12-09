@@ -45,7 +45,7 @@ void kernel_body(kernel_arg_t *arg) {
     }
     local_acc += my_val + my_val_b;
 
-    __syncthreads();
+    // __syncthreads();
     // Compute partial sum for the local tile
     for (uint32_t j = 0; j < tile_size; ++j) {
       sum += local_A[l_row * tile_size + j] * local_B[j * tile_size + l_col];
