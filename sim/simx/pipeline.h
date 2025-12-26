@@ -15,7 +15,9 @@
 #pragma once
 
 #include "instr_trace.h"
+#include <cstdint>
 #include <queue>
+#include <vector>
 
 namespace vortex {
 
@@ -47,6 +49,63 @@ public:
 
 protected:
   std::queue<instr_trace_t*> queue_;
+};
+
+enum class PipelineStageState {
+  Empty,
+  BusyCopy,
+  Ready
+};
+
+struct PipelineDesc {
+  uint64_t base_addr;
+  uint32_t stage_bytes;
+  uint32_t num_stages;
+  uint32_t barrier_base;
+  uint32_t expected_arrivals;
+};
+
+struct PipelineStage {
+  uint64_t buffer_addr;
+  uint32_t stage_bytes;
+  uint32_t barrier_id;
+  PipelineStageState state;
+  uint32_t last_token;
+};
+
+class AsyncPipeline {
+public:
+  AsyncPipeline();
+
+  void reset();
+
+  void init(const PipelineDesc& desc);
+
+  uint32_t num_stages() const {
+    return static_cast<uint32_t>(stages_.size());
+  }
+
+  uint32_t next_stage() const {
+    return next_stage_;
+  }
+
+  PipelineStage& stage(uint32_t index) {
+    return stages_.at(index);
+  }
+
+  const PipelineStage& stage(uint32_t index) const {
+    return stages_.at(index);
+  }
+
+  uint32_t acquire_stage();
+
+  void release_stage(uint32_t stage);
+
+  void mark_ready(uint32_t stage);
+
+private:
+  std::vector<PipelineStage> stages_;
+  uint32_t next_stage_;
 };
 
 }

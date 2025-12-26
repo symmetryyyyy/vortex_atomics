@@ -203,6 +203,7 @@ void Core::reset() {
 }
 
 void Core::tick() {
+  emulator_.tick_tma();
   this->commit();
   this->execute();
   this->issue();
@@ -464,6 +465,38 @@ uint32_t Core::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid) {
 
 bool Core::barrier_wait(uint32_t bar_id, uint32_t token, uint32_t wid) {
   return emulator_.barrier_wait(bar_id, token, wid);
+}
+
+void Core::mbarrier_init(uint32_t bar_id, uint32_t count) {
+  emulator_.mbarrier_init(bar_id, count);
+}
+
+uint32_t Core::mbarrier_arrive(uint32_t bar_id, uint32_t wid) {
+  return emulator_.mbarrier_arrive(bar_id, wid);
+}
+
+void Core::mbarrier_expect_tx(uint32_t bar_id, uint32_t bytes) {
+  emulator_.mbarrier_expect_tx(bar_id, bytes);
+}
+
+void Core::mbarrier_complete_tx(uint32_t bar_id, uint32_t bytes) {
+  emulator_.mbarrier_complete_tx(bar_id, bytes);
+}
+
+bool Core::mbarrier_try_wait(uint32_t bar_id, uint32_t token, uint32_t wid) {
+  return emulator_.mbarrier_try_wait(bar_id, token, wid);
+}
+
+bool Core::pipeline_consumer_wait(uint32_t pipe_id, uint32_t stage, uint32_t wid) {
+  return emulator_.pipeline_consumer_wait(pipe_id, stage, wid);
+}
+
+bool Core::async_group_wait_read(uint32_t group_id, uint32_t wid) {
+  return emulator_.async_group_wait_read(group_id, wid);
+}
+
+bool Core::async_group_wait_write(uint32_t group_id, uint32_t wid) {
+  return emulator_.async_group_wait_write(group_id, wid);
 }
 
 bool Core::wspawn(uint32_t num_warps, Word nextPC) {

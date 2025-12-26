@@ -368,6 +368,185 @@ inline void vx_barrier_wait(int barrier_id, uint32_t token) {
     );
 }
 
+typedef struct {
+    uint64_t base;
+    int32_t dims[5];
+    int32_t strides[5];
+    int32_t ndim;
+    int32_t elem_size;
+} vx_tensor_desc_t;
+
+typedef struct {
+    uint64_t base_addr;
+    uint32_t stage_bytes;
+    uint32_t num_stages;
+    uint32_t barrier_base;
+    uint32_t expected_arrivals;
+} vx_pipeline_desc_t;
+
+typedef struct {
+    uint64_t src;
+    uint32_t bytes;
+    uint32_t group_id;
+    vx_tensor_desc_t dst;
+} vx_tma_store_desc_t;
+
+inline void vx_mbarrier_init(int barrier_id, int num_warps) {
+    __asm__ volatile (
+        ".insn r %0, 0, 2, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(num_warps)
+        : "memory"
+    );
+}
+
+inline uint32_t vx_mbarrier_arrive(int barrier_id) {
+    uint32_t token;
+    __asm__ volatile (
+        ".insn r %1, 1, 2, %0, %2, x0"
+        : "=r"(token)
+        : "i"(RISCV_CUSTOM0), "r"(barrier_id)
+        : "memory"
+    );
+    return token;
+}
+
+inline void vx_mbarrier_expect_tx(int barrier_id, uint32_t bytes) {
+    __asm__ volatile (
+        ".insn r %0, 2, 2, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(bytes)
+        : "memory"
+    );
+}
+
+inline void vx_mbarrier_complete_tx(int barrier_id, uint32_t bytes) {
+    __asm__ volatile (
+        ".insn r %0, 3, 2, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(bytes)
+        : "memory"
+    );
+}
+
+inline uint32_t vx_mbarrier_test_wait(int barrier_id, uint32_t token) {
+    uint32_t ready;
+    __asm__ volatile (
+        ".insn r %1, 4, 2, %0, %2, %3"
+        : "=r"(ready)
+        : "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(token)
+        : "memory"
+    );
+    return ready;
+}
+
+inline void vx_mbarrier_try_wait(int barrier_id, uint32_t token) {
+    __asm__ volatile (
+        ".insn r %0, 5, 2, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(barrier_id), "r"(token)
+        : "memory"
+    );
+}
+
+inline void vx_pipeline_init(int pipeline_id, const vx_pipeline_desc_t* desc) {
+    register uint64_t desc_ptr  __asm__("t0") = (uint64_t)(uintptr_t)desc;
+    __asm__ volatile (
+        ".insn r %0, 0, 3, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(pipeline_id), "r"(desc_ptr)
+        : "memory"
+    );
+}
+
+inline uint32_t vx_pipeline_producer_acquire(int pipeline_id) {
+    uint32_t stage;
+    __asm__ volatile (
+        ".insn r %1, 1, 3, %0, %2, x0"
+        : "=r"(stage)
+        : "i"(RISCV_CUSTOM0), "r"(pipeline_id)
+        : "memory"
+    );
+    return stage;
+}
+
+inline uint32_t vx_pipeline_producer_commit(int pipeline_id, uint32_t stage, uint32_t bytes) {
+    uint32_t token;
+    uint32_t packed = (stage << 16) | (bytes & 0xffff);
+    __asm__ volatile (
+        ".insn r %1, 2, 3, %0, %2, %3"
+        : "=r"(token)
+        : "i"(RISCV_CUSTOM0), "r"(pipeline_id), "r"(packed)
+        : "memory"
+    );
+    return token;
+}
+
+inline void vx_pipeline_consumer_wait(int pipeline_id, uint32_t stage) {
+    __asm__ volatile (
+        ".insn r %0, 3, 3, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(pipeline_id), "r"(stage)
+        : "memory"
+    );
+}
+
+inline void vx_pipeline_consumer_release(int pipeline_id, uint32_t stage) {
+    __asm__ volatile (
+        ".insn r %0, 4, 3, x0, %1, %2"
+        :: "i"(RISCV_CUSTOM0), "r"(pipeline_id), "r"(stage)
+        : "memory"
+    );
+}
+
+inline uint32_t vx_tma_load_async(const vx_tensor_desc_t* desc, uint32_t pipeline_id, uint32_t stage) {
+    uint32_t token;
+    uint32_t packed = (pipeline_id << 16) | (stage & 0xffff);
+    register uint64_t desc_ptr  __asm__("t0") = (uint64_t)(uintptr_t)desc;
+    __asm__ volatile (
+        ".insn r %1, 0, 4, %0, %2, %3"
+        : "=r"(token)
+        : "i"(RISCV_CUSTOM0), "r"(desc_ptr), "r"(packed)
+        : "memory"
+    );
+    return token;
+}
+
+inline void vx_tma_store_async(const vx_tma_store_desc_t* desc) {
+    register uint64_t desc_ptr  __asm__("t0") = (uint64_t)(uintptr_t)desc;
+    __asm__ volatile (
+        ".insn r %0, 1, 4, x0, %1, x0"
+        :: "i"(RISCV_CUSTOM0), "r"(desc_ptr)
+        : "memory"
+    );
+}
+
+inline void vx_fence_proxy_async_shared() {
+    __asm__ volatile (
+        ".insn r %0, 0, 5, x0, x0, x0"
+        :: "i"(RISCV_CUSTOM0)
+        : "memory"
+    );
+}
+
+inline void vx_cp_async_bulk_commit_group(uint32_t group_id) {
+    __asm__ volatile (
+        ".insn r %0, 1, 5, x0, %1, x0"
+        :: "i"(RISCV_CUSTOM0), "r"(group_id)
+        : "memory"
+    );
+}
+
+inline void vx_cp_async_bulk_wait_group_read(uint32_t group_id) {
+    __asm__ volatile (
+        ".insn r %0, 2, 5, x0, %1, x0"
+        :: "i"(RISCV_CUSTOM0), "r"(group_id)
+        : "memory"
+    );
+}
+
+inline void vx_cp_async_bulk_wait_group_write(uint32_t group_id) {
+    __asm__ volatile (
+        ".insn r %0, 3, 5, x0, %1, x0"
+        :: "i"(RISCV_CUSTOM0), "r"(group_id)
+        : "memory"
+    );
+}
+
 
 #ifdef __cplusplus
 }

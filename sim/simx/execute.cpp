@@ -1441,6 +1441,117 @@ instr_trace_t* Emulator::execute(const Instr &instr, uint32_t wid) {
         std::abort();
       }
     }
+    ,[&](AsyncType async_type) {
+      switch (async_type) {
+      case AsyncType::MBAR_INIT: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t count = rs2_data[thread_last].u;
+        this->mbarrier_init(bar_id, count);
+      } break;
+      case AsyncType::MBAR_ARRIVE: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t token = this->mbarrier_arrive(bar_id, wid);
+        for (uint32_t t = thread_start; t < num_threads; ++t) {
+          rd_data[t].u = token;
+        }
+        rd_write = true;
+      } break;
+      case AsyncType::MBAR_EXPECT_TX: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t bytes = rs2_data[thread_last].u;
+        this->mbarrier_expect_tx(bar_id, bytes);
+      } break;
+      case AsyncType::MBAR_COMPLETE_TX: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t bytes = rs2_data[thread_last].u;
+        this->mbarrier_complete_tx(bar_id, bytes);
+      } break;
+      case AsyncType::MBAR_TEST_WAIT: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t token = rs2_data[thread_last].u;
+        uint32_t ready = this->mbarrier_test_wait(bar_id, token) ? 1 : 0;
+        for (uint32_t t = thread_start; t < num_threads; ++t) {
+          rd_data[t].u = ready;
+        }
+        rd_write = true;
+      } break;
+      case AsyncType::MBAR_TRY_WAIT: {
+        uint32_t bar_id = rs1_data[thread_last].u;
+        uint32_t token = rs2_data[thread_last].u;
+        trace->fetch_stall = true;
+        trace->data = std::make_shared<SfuTraceData>(bar_id, token);
+      } break;
+      case AsyncType::PIPE_INIT: {
+        uint32_t pipe_id = rs1_data[thread_last].u;
+        uint64_t desc_addr = rs2_data[thread_last].u64;
+        this->pipeline_init(pipe_id, desc_addr);
+      } break;
+      case AsyncType::PIPE_PROD_ACQUIRE: {
+        uint32_t pipe_id = rs1_data[thread_last].u;
+        uint32_t stage = this->pipeline_producer_acquire(pipe_id);
+        for (uint32_t t = thread_start; t < num_threads; ++t) {
+          rd_data[t].u = stage;
+        }
+        rd_write = true;
+      } break;
+      case AsyncType::PIPE_PROD_COMMIT: {
+        uint32_t pipe_id = rs1_data[thread_last].u;
+        uint32_t packed = rs2_data[thread_last].u;
+        uint32_t stage = packed >> 16;
+        uint32_t bytes = packed & 0xffff;
+        uint32_t token = this->pipeline_producer_commit(pipe_id, stage, bytes, wid);
+        for (uint32_t t = thread_start; t < num_threads; ++t) {
+          rd_data[t].u = token;
+        }
+        rd_write = true;
+      } break;
+      case AsyncType::PIPE_CONS_WAIT: {
+        uint32_t pipe_id = rs1_data[thread_last].u;
+        uint32_t stage = rs2_data[thread_last].u;
+        trace->fetch_stall = true;
+        trace->data = std::make_shared<SfuTraceData>(pipe_id, stage);
+      } break;
+      case AsyncType::PIPE_CONS_RELEASE: {
+        uint32_t pipe_id = rs1_data[thread_last].u;
+        uint32_t stage = rs2_data[thread_last].u;
+        this->pipeline_consumer_release(pipe_id, stage);
+      } break;
+      case AsyncType::TMA_LOAD: {
+        uint64_t desc_addr = rs1_data[thread_last].u64;
+        uint32_t packed = rs2_data[thread_last].u;
+        uint32_t pipe_id = packed >> 16;
+        uint32_t stage = packed & 0xffff;
+        uint32_t token = this->tma_load_async(desc_addr, pipe_id, stage, wid);
+        for (uint32_t t = thread_start; t < num_threads; ++t) {
+          rd_data[t].u = token;
+        }
+        rd_write = true;
+      } break;
+      case AsyncType::TMA_STORE: {
+        uint64_t desc_addr = rs1_data[thread_last].u64;
+        this->tma_store_async(desc_addr);
+      } break;
+      case AsyncType::ASYNC_FENCE: {
+        this->fence_proxy_async_shared();
+      } break;
+      case AsyncType::ASYNC_GROUP_COMMIT: {
+        uint32_t group_id = rs1_data[thread_last].u;
+        this->async_group_commit(group_id);
+      } break;
+      case AsyncType::ASYNC_GROUP_WAIT_READ: {
+        uint32_t group_id = rs1_data[thread_last].u;
+        trace->fetch_stall = true;
+        trace->data = std::make_shared<SfuTraceData>(group_id, 0);
+      } break;
+      case AsyncType::ASYNC_GROUP_WAIT_WRITE: {
+        uint32_t group_id = rs1_data[thread_last].u;
+        trace->fetch_stall = true;
+        trace->data = std::make_shared<SfuTraceData>(group_id, 0);
+      } break;
+      default:
+        std::abort();
+      }
+    }
   #ifdef EXT_V_ENABLE
     ,[&](VsetType /*vset_type*/) {
       auto trace_data = std::make_shared<VecUnit::ExeTraceData>();

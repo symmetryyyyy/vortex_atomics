@@ -398,6 +398,42 @@ void SfuUnit::tick() {
 				std::abort();
 			}
 			DT(3, this->name() << ": op=" << wctl_type << ", " << *trace);
+		} else if (std::get_if<AsyncType>(&trace->op_type)) {
+			auto async_type = std::get<AsyncType>(trace->op_type);
+			switch (async_type) {
+			case AsyncType::MBAR_TRY_WAIT: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					release_warp = core_->mbarrier_try_wait(trace_data->arg1, trace_data->arg2, trace->wid);
+				}
+			} break;
+			case AsyncType::PIPE_CONS_WAIT: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					release_warp = core_->pipeline_consumer_wait(trace_data->arg1, trace_data->arg2, trace->wid);
+				}
+			} break;
+			case AsyncType::ASYNC_GROUP_WAIT_READ: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					release_warp = core_->async_group_wait_read(trace_data->arg1, trace->wid);
+				}
+			} break;
+			case AsyncType::ASYNC_GROUP_WAIT_WRITE: {
+				output.push(trace, 2+delay);
+				if (trace->eop) {
+					auto trace_data = std::dynamic_pointer_cast<SfuTraceData>(trace->data);
+					release_warp = core_->async_group_wait_write(trace_data->arg1, trace->wid);
+				}
+			} break;
+			default:
+				output.push(trace, 2+delay);
+				break;
+			}
+			DT(3, this->name() << ": op=" << async_type << ", " << *trace);
 		} else if (std::get_if<CsrType>(&trace->op_type)) {
 			auto csr_type = std::get<CsrType>(trace->op_type);
 			switch  (csr_type) {
