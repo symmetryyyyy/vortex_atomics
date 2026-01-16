@@ -474,8 +474,15 @@ package VX_gpu_pkg;
         logic [DV_STACK_SIZEW-1:0] stack_ptr;
     } join_t;
 
+    typedef enum logic [1:0] {
+        BARRIER_OP_SYNC   = 2'd0,
+        BARRIER_OP_ARRIVE = 2'd1,
+        BARRIER_OP_WAIT   = 2'd2
+    } barrier_op_e;
+
     typedef struct packed {
         logic                   valid;
+        barrier_op_e            op;
         logic [NB_WIDTH-1:0]    id;
         logic                   is_global;
     `ifdef GBAR_ENABLE
@@ -484,16 +491,9 @@ package VX_gpu_pkg;
         logic [NW_WIDTH-1:0]    size_m1;
     `endif
         logic                   is_noop;
-    } barrier_t;
-
-    typedef struct packed {
-        logic                   valid;
-        // logic                   is_noop;
-        logic [NB_WIDTH-1:0]    id;
-        logic                   is_arrive;
-        logic [NW_WIDTH-1:0]    count;             
+        logic [NW_WIDTH-1:0]    count;
         logic [`XLEN-1:0]       token;
-    } async_barrier_t;
+    } barrier_t;
 
 
 
