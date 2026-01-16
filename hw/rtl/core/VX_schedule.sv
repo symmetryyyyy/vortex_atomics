@@ -90,12 +90,10 @@ module VX_schedule import VX_gpu_pkg::*; #(
     reg [`NUM_WARPS-1:0] barrier_stalls, barrier_stalls_n;
     reg [`NUM_WARPS-1:0] curr_barrier_mask_p1;
 
-    // async barriers
+    // async barriers (reuse barrier_masks/barrier_ctrs for arrive tracking)
     reg [`NUM_BARRIERS-1:0][`XLEN-1:0] async_bar_generation, async_bar_generation_n;
-    reg [`NUM_BARRIERS-1:0][`NUM_WARPS-1:0] async_bar_arrived, async_bar_arrived_n;
     reg [`NUM_BARRIERS-1:0][`NUM_WARPS-1:0] async_bar_waiting, async_bar_waiting_n;
     reg [`NUM_BARRIERS-1:0][NW_WIDTH-1:0] async_bar_count, async_bar_count_n;
-    reg [`NUM_BARRIERS-1:0][NW_WIDTH-1:0] async_bar_arrived_cnt, async_bar_arrived_cnt_n;
 
 `ifdef GBAR_ENABLE
     reg gbar_req_valid;
@@ -122,10 +120,8 @@ module VX_schedule import VX_gpu_pkg::*; #(
 
         // async barrier next state
         async_bar_generation_n = async_bar_generation;
-        async_bar_arrived_n = async_bar_arrived;
         async_bar_waiting_n = async_bar_waiting;
         async_bar_count_n = async_bar_count;
-        async_bar_arrived_cnt_n = async_bar_arrived_cnt;
 
         // decode unlock
         if (decode_sched_if.valid && decode_sched_if.unlock) begin
@@ -213,25 +209,21 @@ module VX_schedule import VX_gpu_pkg::*; #(
                 end
                 
                 // Mark this warp as arrived (if not already)
-                if (~async_bar_arrived[warp_ctl_if.async_barrier.id][warp_ctl_if.wid]) begin
-                    async_bar_arrived_n[warp_ctl_if.async_barrier.id][warp_ctl_if.wid] = 1;
-                    async_bar_arrived_cnt_n[warp_ctl_if.async_barrier.id] = async_bar_arrived_cnt[warp_ctl_if.async_barrier.id] + NW_WIDTH'(1);
+                if (~barrier_masks_n[warp_ctl_if.async_barrier.id][warp_ctl_if.wid]) begin
+                    barrier_masks_n[warp_ctl_if.async_barrier.id][warp_ctl_if.wid] = 1;
+                    barrier_ctrs_n[warp_ctl_if.async_barrier.id] = barrier_ctrs_n[warp_ctl_if.async_barrier.id] + NW_WIDTH'(1);
                 end
                 
                 // Check if all warps have arrived
-                if (async_bar_arrived_cnt_n[warp_ctl_if.async_barrier.id] == async_bar_count[warp_ctl_if.async_barrier.id]) begin
+                if (barrier_ctrs_n[warp_ctl_if.async_barrier.id] == async_bar_count[warp_ctl_if.async_barrier.id]) begin
                     // Advance generation
                     async_bar_generation_n[warp_ctl_if.async_barrier.id] = async_bar_generation[warp_ctl_if.async_barrier.id] + `XLEN'(1);
                     // Reset arrived state for next generation
-                    async_bar_arrived_n[warp_ctl_if.async_barrier.id] = '0;
-                    async_bar_arrived_cnt_n[warp_ctl_if.async_barrier.id] = '0;
+                    barrier_masks_n[warp_ctl_if.async_barrier.id] = '0;
+                    barrier_ctrs_n[warp_ctl_if.async_barrier.id] = '0;
                     // Wake all waiting warps
-                    for (integer w = 0; w < `NUM_WARPS; w = w + 1) begin
-                        if (async_bar_waiting[warp_ctl_if.async_barrier.id][w]) begin
-                            stalled_warps_n[w] = 0;
-                            async_bar_waiting_n[warp_ctl_if.async_barrier.id][w] = 0;
-                        end
-                    end
+                    stalled_warps_n &= ~async_bar_waiting[warp_ctl_if.async_barrier.id];
+                    async_bar_waiting_n[warp_ctl_if.async_barrier.id] = '0;
                 end
                 
                 // ARRIVE is non-blocking, unlock warp immediately
@@ -289,10 +281,8 @@ module VX_schedule import VX_gpu_pkg::*; #(
 
             // async barrier reset
             async_bar_generation <= '0;
-            async_bar_arrived    <= '0;
             async_bar_waiting    <= '0;
             async_bar_count      <= '0;
-            async_bar_arrived_cnt <= '0;
 
             // activate first warp
             warp_pcs[0]     <= from_fullPC(base_dcrs.startup_addr);
@@ -311,10 +301,8 @@ module VX_schedule import VX_gpu_pkg::*; #(
 
             // async barrier state updates
             async_bar_generation  <= async_bar_generation_n;
-            async_bar_arrived     <= async_bar_arrived_n;
             async_bar_waiting     <= async_bar_waiting_n;
             async_bar_count       <= async_bar_count_n;
-            async_bar_arrived_cnt <= async_bar_arrived_cnt_n;
 
             // wspawn handling
             if (warp_ctl_if.valid && warp_ctl_if.wspawn.valid) begin
