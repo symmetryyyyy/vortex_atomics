@@ -135,6 +135,15 @@ public:
   // Async barrier wait: uses token to determine which phase to wait for
   bool barrier_wait(uint32_t bar_id, uint32_t token, uint32_t wid);
 
+  void mbarrier_init(uint32_t bar_id, uint32_t count);
+  uint32_t mbarrier_arrive(uint32_t bar_id, uint32_t wid);
+  void mbarrier_expect_tx(uint32_t bar_id, uint32_t bytes);
+  void mbarrier_complete_tx(uint32_t bar_id, uint32_t bytes);
+  bool mbarrier_try_wait(uint32_t bar_id, uint32_t token, uint32_t wid);
+  bool pipeline_consumer_wait(uint32_t pipe_id, uint32_t stage, uint32_t wid);
+  bool async_group_wait_read(uint32_t group_id, uint32_t wid);
+  bool async_group_wait_write(uint32_t group_id, uint32_t wid);
+
   //void async_barrier_arrive(uint32_t bar_id, uint32_t count);
 
   //bool async_barrier_wait(uint32_t bar_id, uint32_t count);

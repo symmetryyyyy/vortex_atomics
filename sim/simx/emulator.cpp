@@ -78,7 +78,10 @@ Emulator::Emulator(const Arch &arch, const DCRS &dcrs, Core* core)
     , core_(core)
     , warps_(arch.num_warps(), arch.num_threads())
     , barriers_(arch.num_barriers(), 0)
-    , async_barriers_(arch.num_barriers())
+    , mbarriers_(arch.num_barriers())
+    , pipelines_(arch.num_barriers())
+    , tma_unit_(std::make_unique<TmaUnit>(this))
+    , async_groups_(arch.num_barriers(), {false, false})
     , ipdom_size_(arch.num_threads()-1)
   #ifdef EXT_TCU_ENABLE
     , tensor_unit_(core->tensor_unit())
@@ -114,9 +117,20 @@ void Emulator::reset() {
     barrier.reset();
   }
 
-  for (auto& async_bar : async_barriers_) {
-    async_bar.reset_for_next_gen();
+  for (auto& mbarrier : mbarriers_) {
+    mbarrier.reset();
   }
+
+  for (auto& pipeline : pipelines_) {
+    pipeline.reset();
+  }
+
+  for (auto& group : async_groups_) {
+    group.read_done = false;
+    group.write_done = false;
+  }
+
+  tma_unit_->reset();
 
 #ifdef EXT_V_ENABLE
   vec_unit_->reset();
@@ -305,65 +319,13 @@ uint32_t Emulator::barrier_arrive(uint32_t bar_id, uint32_t count, uint32_t wid)
         return 0; // cluster level doesn't use token
     }
 
-    auto& b = async_barriers_.at(bar_idx);
+    auto& b = mbarriers_.at(bar_idx);
 
-    // record expect_count to prevent different carrying different count (should be redundant)
-    if (b.expect_count == 0) {
-        b.expect_count = count;
+    if (b.expected_arrivals == 0 || b.expected_arrivals != count) {
+        mbarrier_init(bar_idx, count);
     }
 
-    // Capture current generation as token BEFORE any updates
-    uint32_t token = b.generation;
-
-    std::cout << "[ARRIVE] warp=" << wid
-              << " gen =" << b.generation
-              << " token=" << token
-              << " expect =" << b.expect_count
-              << " arrived_count =" << b.arrived_count
-              << " arrived_mask =" << b.arrived_mask
-              << std::endl;
-
-    // If arrived in the same generation before, skip but still return token
-    if (b.arrived_mask.test(wid)) {
-        std::cout << "  >> ARRIVE_DUP warp=" << wid << " (already arrived this gen)\n";
-        return token;
-    }
-
-    // record the arrival
-    b.arrived_mask.set(wid);
-    ++b.arrived_count;
-
-    std::cout << " [ARRIVE_UPDATE] warp=" << wid
-              << " arrived_count=" << b.arrived_count
-              << " arrived_mask=" << b.arrived_mask
-              << std::endl;
-
-    // If all warps arrived, update the generation
-    if (b.arrived_count == b.expect_count) {
-        uint32_t new_gen = b.generation + 1;
-
-        std::cout << " [GENERATION COMPLETE]: gen="
-                  << b.generation << " -> " << new_gen << std::endl;
-
-        b.generation = new_gen;
-        b.arrived_count = 0;
-        b.arrived_mask.reset();
-
-        // wake all warps waiting for this generation
-        for (uint32_t w = 0; w < arch_.num_warps(); ++w) {
-            if (b.waiting_mask.test(w)) {
-                // Check if this warp's token indicates it should wake up
-                // A warp waiting with token T should wake when generation > T
-                std::cout << "  [CHECK WAKE warp] =" << w
-                          << " now_gen =" << b.generation
-                          << std::endl;
-                b.waiting_mask.reset(w);
-                stalled_warps_.reset(w);
-            }
-        }
-    }
-
-    return token;
+    return mbarrier_arrive(bar_idx, wid);
 }
 
 
@@ -383,51 +345,201 @@ bool Emulator::barrier_wait(uint32_t bar_id, uint32_t token, uint32_t wid) {
         return true;
     }
 
-    auto& b = async_barriers_.at(bar_idx);
+    return mbarrier_try_wait(bar_idx, token, wid);
+}
 
-    // Calculate desired generation from token
-    // Token represents the generation when arrive() was called
-    // We need to wait until generation > token (i.e., that phase completed)
-    uint32_t desired_gen = token + 1;
+void Emulator::mbarrier_init(uint32_t bar_id, uint32_t count) {
+    auto& b = mbarriers_.at(bar_id);
+    b.expected_arrivals = count;
+    b.pending_arrivals = count;
+    b.pending_tx_bytes = 0;
+    b.phase = 0;
+    b.arrived_mask.reset();
+    b.waiting_mask.reset();
+}
 
-    std::cout << "[WAIT] warp=" << wid
-              << " token=" << token
-              << " desired_gen=" << desired_gen
-              << " current_gen=" << b.generation
-              << " arrived_mask=" << b.arrived_mask
-              << " waiting_mask=" << b.waiting_mask
-              << std::endl;
+uint32_t Emulator::mbarrier_arrive(uint32_t bar_id, uint32_t wid) {
+    auto& b = mbarriers_.at(bar_id);
+    uint32_t token = b.phase;
 
-    if (b.generation >= desired_gen) {
-        std::cout << "[WAIT_DONE] warp=" << wid
-                  << " reaches gen=" << b.generation
-                  << " (desired=" << desired_gen << ", token=" << token << ")"
-                  << std::endl;
+    if (b.arrived_mask.test(wid)) {
+        return token;
+    }
 
+    b.arrived_mask.set(wid);
+    if (b.pending_arrivals > 0) {
+        --b.pending_arrivals;
+    }
+
+    if (b.pending_arrivals == 0 && b.pending_tx_bytes == 0) {
+        b.phase++;
+        b.pending_arrivals = b.expected_arrivals;
+        b.arrived_mask.reset();
+        for (uint32_t w = 0; w < arch_.num_warps(); ++w) {
+            if (b.waiting_mask.test(w)) {
+                b.waiting_mask.reset(w);
+                stalled_warps_.reset(w);
+            }
+        }
+    }
+
+    return token;
+}
+
+void Emulator::mbarrier_expect_tx(uint32_t bar_id, uint32_t bytes) {
+    auto& b = mbarriers_.at(bar_id);
+    b.pending_tx_bytes += bytes;
+}
+
+void Emulator::mbarrier_complete_tx(uint32_t bar_id, uint32_t bytes) {
+    auto& b = mbarriers_.at(bar_id);
+    if (b.pending_tx_bytes >= bytes) {
+        b.pending_tx_bytes -= bytes;
+    } else {
+        b.pending_tx_bytes = 0;
+    }
+
+    if (b.pending_arrivals == 0 && b.pending_tx_bytes == 0) {
+        b.phase++;
+        b.pending_arrivals = b.expected_arrivals;
+        b.arrived_mask.reset();
+        for (uint32_t w = 0; w < arch_.num_warps(); ++w) {
+            if (b.waiting_mask.test(w)) {
+                b.waiting_mask.reset(w);
+                stalled_warps_.reset(w);
+            }
+        }
+    }
+}
+
+bool Emulator::mbarrier_test_wait(uint32_t bar_id, uint32_t token) {
+    auto& b = mbarriers_.at(bar_id);
+    return b.phase > token;
+}
+
+bool Emulator::mbarrier_try_wait(uint32_t bar_id, uint32_t token, uint32_t wid) {
+    auto& b = mbarriers_.at(bar_id);
+    if (b.phase > token) {
         b.waiting_mask.reset(wid);
         stalled_warps_.reset(wid);
-
-        std::cout << "waiting_mask(after pass)="
-                  << b.waiting_mask
-                  << std::endl;
-
         return true;
     }
 
-    // Not reached, wait
-    std::cout << "  warp " << wid
-              << " waiting for gen " << desired_gen
-              << " (current gen=" << b.generation << ", token=" << token << ")"
-              << std::endl;
-
     b.waiting_mask.set(wid);
     stalled_warps_.set(wid);
-
-    std::cout << "waiting_mask(after stall)="
-              << b.waiting_mask
-              << std::endl;
-
     return false;
+}
+
+void Emulator::pipeline_init(uint32_t pipe_id, uint64_t desc_addr) {
+    PipelineDesc desc{};
+    dcache_read(&desc, desc_addr, sizeof(desc));
+    auto& pipeline = pipelines_.at(pipe_id);
+    pipeline.init(desc);
+    for (uint32_t i = 0; i < desc.num_stages; ++i) {
+        mbarrier_init(desc.barrier_base + i, desc.expected_arrivals);
+    }
+}
+
+uint32_t Emulator::pipeline_producer_acquire(uint32_t pipe_id) {
+    auto& pipeline = pipelines_.at(pipe_id);
+    return pipeline.acquire_stage();
+}
+
+uint32_t Emulator::pipeline_producer_commit(uint32_t pipe_id, uint32_t stage, uint32_t bytes, uint32_t wid) {
+    auto& pipeline = pipelines_.at(pipe_id);
+    auto& entry = pipeline.stage(stage);
+    entry.state = PipelineStageState::BusyCopy;
+    mbarrier_expect_tx(entry.barrier_id, bytes);
+    uint32_t token = mbarrier_arrive(entry.barrier_id, wid);
+    entry.last_token = token;
+    return token;
+}
+
+bool Emulator::pipeline_consumer_wait(uint32_t pipe_id, uint32_t stage, uint32_t wid) {
+    auto& pipeline = pipelines_.at(pipe_id);
+    auto& entry = pipeline.stage(stage);
+    bool ready = mbarrier_try_wait(entry.barrier_id, entry.last_token, wid);
+    if (ready) {
+        pipeline.mark_ready(stage);
+    }
+    return ready;
+}
+
+void Emulator::pipeline_consumer_release(uint32_t pipe_id, uint32_t stage) {
+    auto& pipeline = pipelines_.at(pipe_id);
+    pipeline.release_stage(stage);
+}
+
+void Emulator::pipeline_mark_ready(uint32_t pipe_id, uint32_t stage) {
+    auto& pipeline = pipelines_.at(pipe_id);
+    pipeline.mark_ready(stage);
+}
+
+uint32_t Emulator::tma_load_async(uint64_t desc_addr, uint32_t pipe_id, uint32_t stage, uint32_t wid) {
+    tensor_desc_t desc{};
+    dcache_read(&desc, desc_addr, sizeof(desc));
+    auto& pipeline = pipelines_.at(pipe_id);
+    auto& entry = pipeline.stage(stage);
+    uint32_t bytes = static_cast<uint32_t>(desc.elem_size);
+    for (int i = 0; i < desc.ndim; ++i) {
+        bytes *= static_cast<uint32_t>(desc.dims[i]);
+    }
+    uint32_t token = pipeline_producer_commit(pipe_id, stage, bytes, wid);
+    tma_unit_->enqueue_load(desc, entry.buffer_addr, entry.barrier_id, pipe_id, stage);
+    return token;
+}
+
+void Emulator::tma_store_async(uint64_t desc_addr) {
+    tma_store_desc_t desc{};
+    dcache_read(&desc, desc_addr, sizeof(desc));
+    tma_unit_->enqueue_store(desc);
+}
+
+void Emulator::fence_proxy_async_shared() {
+}
+
+void Emulator::async_group_commit(uint32_t group_id) {
+    if (group_id >= async_groups_.size()) {
+        return;
+    }
+    async_groups_[group_id].read_done = false;
+    async_groups_[group_id].write_done = false;
+}
+
+bool Emulator::async_group_wait_read(uint32_t group_id, uint32_t wid) {
+    if (group_id >= async_groups_.size()) {
+        return true;
+    }
+    if (async_groups_[group_id].read_done) {
+        stalled_warps_.reset(wid);
+        return true;
+    }
+    stalled_warps_.set(wid);
+    return false;
+}
+
+bool Emulator::async_group_wait_write(uint32_t group_id, uint32_t wid) {
+    if (group_id >= async_groups_.size()) {
+        return true;
+    }
+    if (async_groups_[group_id].write_done) {
+        stalled_warps_.reset(wid);
+        return true;
+    }
+    stalled_warps_.set(wid);
+    return false;
+}
+
+void Emulator::async_group_complete(uint32_t group_id) {
+    if (group_id >= async_groups_.size()) {
+        return;
+    }
+    async_groups_[group_id].read_done = true;
+    async_groups_[group_id].write_done = true;
+}
+
+void Emulator::tick_tma() {
+    tma_unit_->tick();
 }
 
 

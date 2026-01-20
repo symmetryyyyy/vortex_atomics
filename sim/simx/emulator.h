@@ -17,9 +17,12 @@
 #include <vector>
 #include <sstream>
 #include <stack>
+#include <memory>
 #include <mem.h>
 #include "types.h"
 #include "instr.h"
+#include "pipeline.h"
+#include "tma_unit.h"
 #ifdef EXT_TCU_ENABLE
 #include "tensor_unit.h"
 #endif
@@ -106,6 +109,29 @@ public:
   // Async barrier wait: uses token to determine which phase to wait for
   bool barrier_wait(uint32_t bar_id, uint32_t token, uint32_t wid);
 
+  void mbarrier_init(uint32_t bar_id, uint32_t count);
+  uint32_t mbarrier_arrive(uint32_t bar_id, uint32_t wid);
+  void mbarrier_expect_tx(uint32_t bar_id, uint32_t bytes);
+  void mbarrier_complete_tx(uint32_t bar_id, uint32_t bytes);
+  bool mbarrier_test_wait(uint32_t bar_id, uint32_t token);
+  bool mbarrier_try_wait(uint32_t bar_id, uint32_t token, uint32_t wid);
+
+  void pipeline_init(uint32_t pipe_id, uint64_t desc_addr);
+  uint32_t pipeline_producer_acquire(uint32_t pipe_id);
+  uint32_t pipeline_producer_commit(uint32_t pipe_id, uint32_t stage, uint32_t bytes, uint32_t wid);
+  bool pipeline_consumer_wait(uint32_t pipe_id, uint32_t stage, uint32_t wid);
+  void pipeline_consumer_release(uint32_t pipe_id, uint32_t stage);
+  void pipeline_mark_ready(uint32_t pipe_id, uint32_t stage);
+
+  uint32_t tma_load_async(uint64_t desc_addr, uint32_t pipe_id, uint32_t stage, uint32_t wid);
+  void tma_store_async(uint64_t desc_addr);
+
+  void fence_proxy_async_shared();
+  void async_group_commit(uint32_t group_id);
+  bool async_group_wait_read(uint32_t group_id, uint32_t wid);
+  bool async_group_wait_write(uint32_t group_id, uint32_t wid);
+  void async_group_complete(uint32_t group_id);
+
   bool wspawn(uint32_t num_warps, Word nextPC);
 
   int get_exitcode() const;
@@ -113,6 +139,8 @@ public:
   void dcache_read(void* data, uint64_t addr, uint32_t size);
 
   void dcache_write(const void* data, uint64_t addr, uint32_t size);
+
+  void tick_tma();
 
 private:
 
@@ -162,39 +190,46 @@ private:
   wspawn_t    wspawn_;
   //** */
 
-  struct AsyncBarrier {
+  struct MBarrier {
     #define MAX_WARPS 32
 
     WarpMask arrived_mask;
     WarpMask waiting_mask;
-    uint32_t arrived_count;
-    uint32_t expect_count;
-    uint32_t generation;
-    
-    std::array<uint32_t, MAX_WARPS> wait_phase;
+    uint32_t expected_arrivals;
+    uint32_t pending_arrivals;
+    uint32_t pending_tx_bytes;
+    uint32_t phase;
 
-    AsyncBarrier()
-        : arrived_count(0)
-        , expect_count(0)
-        , generation(0)
+    MBarrier()
+        : expected_arrivals(0)
+        , pending_arrivals(0)
+        , pending_tx_bytes(0)
+        , phase(0)
     {
         arrived_mask.reset();
         waiting_mask.reset();
-        wait_phase.fill(0);
     }
 
-    void reset_for_next_gen() {
+    void reset() {
         arrived_mask.reset();
         waiting_mask.reset();
-        arrived_count = 0;
-        generation = 0;
-        expect_count = 0;
-        wait_phase.fill(0);
+        expected_arrivals = 0;
+        pending_arrivals = 0;
+        pending_tx_bytes = 0;
+        phase = 0;
     }
 };
 
 
-std::vector<AsyncBarrier> async_barriers_;
+struct AsyncGroupState {
+  bool read_done;
+  bool write_done;
+};
+
+std::vector<MBarrier> mbarriers_;
+std::vector<AsyncPipeline> pipelines_;
+std::unique_ptr<TmaUnit> tma_unit_;
+std::vector<AsyncGroupState> async_groups_;
 
 
 

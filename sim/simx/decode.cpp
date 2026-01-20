@@ -1053,6 +1053,129 @@ void Emulator::decode(uint32_t code, uint32_t wid, uint64_t uuid) {
       instr->setArgs(wctlArgs);
       ibuffer.push_back(instr);
     } break;
+    case 2: { // Async barrier/pipeline ops
+      auto instr = std::allocate_shared<Instr>(instr_pool_, uuid, FUType::SFU);
+      IntrAsyncArgs asyncArgs{};
+      switch (funct3) {
+      case 0: // MBAR_INIT
+        instr->setOpType(AsyncType::MBAR_INIT);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 1: // MBAR_ARRIVE
+        instr->setOpType(AsyncType::MBAR_ARRIVE);
+        instr->setDestReg(rd, RegType::Integer);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        break;
+      case 2: // MBAR_EXPECT_TX
+        instr->setOpType(AsyncType::MBAR_EXPECT_TX);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 3: // MBAR_COMPLETE_TX
+        instr->setOpType(AsyncType::MBAR_COMPLETE_TX);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 4: // MBAR_TEST_WAIT
+        instr->setOpType(AsyncType::MBAR_TEST_WAIT);
+        instr->setDestReg(rd, RegType::Integer);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 5: // MBAR_TRY_WAIT
+        instr->setOpType(AsyncType::MBAR_TRY_WAIT);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      default:
+        std::abort();
+      }
+      instr->setArgs(asyncArgs);
+      ibuffer.push_back(instr);
+    } break;
+    case 3: { // Pipeline ops
+      auto instr = std::allocate_shared<Instr>(instr_pool_, uuid, FUType::SFU);
+      IntrAsyncArgs asyncArgs{};
+      switch (funct3) {
+      case 0: // PIPE_INIT
+        instr->setOpType(AsyncType::PIPE_INIT);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 1: // PIPE_PROD_ACQUIRE
+        instr->setOpType(AsyncType::PIPE_PROD_ACQUIRE);
+        instr->setDestReg(rd, RegType::Integer);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        break;
+      case 2: // PIPE_PROD_COMMIT
+        instr->setOpType(AsyncType::PIPE_PROD_COMMIT);
+        instr->setDestReg(rd, RegType::Integer);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 3: // PIPE_CONS_WAIT
+        instr->setOpType(AsyncType::PIPE_CONS_WAIT);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 4: // PIPE_CONS_RELEASE
+        instr->setOpType(AsyncType::PIPE_CONS_RELEASE);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      default:
+        std::abort();
+      }
+      instr->setArgs(asyncArgs);
+      ibuffer.push_back(instr);
+    } break;
+    case 4: { // TMA ops
+      auto instr = std::allocate_shared<Instr>(instr_pool_, uuid, FUType::SFU);
+      IntrAsyncArgs asyncArgs{};
+      switch (funct3) {
+      case 0: // TMA_LOAD
+        instr->setOpType(AsyncType::TMA_LOAD);
+        instr->setDestReg(rd, RegType::Integer);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      case 1: // TMA_STORE
+        instr->setOpType(AsyncType::TMA_STORE);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        instr->setSrcReg(1, rs2, RegType::Integer);
+        break;
+      default:
+        std::abort();
+      }
+      instr->setArgs(asyncArgs);
+      ibuffer.push_back(instr);
+    } break;
+    case 5: { // Async proxy/group ops
+      auto instr = std::allocate_shared<Instr>(instr_pool_, uuid, FUType::SFU);
+      IntrAsyncArgs asyncArgs{};
+      switch (funct3) {
+      case 0: // ASYNC_FENCE
+        instr->setOpType(AsyncType::ASYNC_FENCE);
+        break;
+      case 1: // ASYNC_GROUP_COMMIT
+        instr->setOpType(AsyncType::ASYNC_GROUP_COMMIT);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        break;
+      case 2: // ASYNC_GROUP_WAIT_READ
+        instr->setOpType(AsyncType::ASYNC_GROUP_WAIT_READ);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        break;
+      case 3: // ASYNC_GROUP_WAIT_WRITE
+        instr->setOpType(AsyncType::ASYNC_GROUP_WAIT_WRITE);
+        instr->setSrcReg(0, rs1, RegType::Integer);
+        break;
+      default:
+        std::abort();
+      }
+      instr->setArgs(asyncArgs);
+      ibuffer.push_back(instr);
+    } break;
     case 1: { // VOTE
       auto instr = std::allocate_shared<Instr>(instr_pool_, uuid, FUType::ALU);
       instr->setDestReg(rd, RegType::Integer);

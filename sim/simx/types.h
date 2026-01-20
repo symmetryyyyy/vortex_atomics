@@ -458,6 +458,55 @@ inline std::ostream &operator<<(std::ostream &os, const WctlType& type) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+enum class AsyncType {
+  MBAR_INIT,
+  MBAR_ARRIVE,
+  MBAR_EXPECT_TX,
+  MBAR_COMPLETE_TX,
+  MBAR_TEST_WAIT,
+  MBAR_TRY_WAIT,
+  PIPE_INIT,
+  PIPE_PROD_ACQUIRE,
+  PIPE_PROD_COMMIT,
+  PIPE_CONS_WAIT,
+  PIPE_CONS_RELEASE,
+  TMA_LOAD,
+  TMA_STORE,
+  ASYNC_FENCE,
+  ASYNC_GROUP_COMMIT,
+  ASYNC_GROUP_WAIT_READ,
+  ASYNC_GROUP_WAIT_WRITE
+};
+
+struct IntrAsyncArgs {};
+
+inline std::ostream &operator<<(std::ostream &os, const AsyncType& type) {
+  switch (type) {
+  case AsyncType::MBAR_INIT: os << "MBAR_INIT"; break;
+  case AsyncType::MBAR_ARRIVE: os << "MBAR_ARRIVE"; break;
+  case AsyncType::MBAR_EXPECT_TX: os << "MBAR_EXPECT_TX"; break;
+  case AsyncType::MBAR_COMPLETE_TX: os << "MBAR_COMPLETE_TX"; break;
+  case AsyncType::MBAR_TEST_WAIT: os << "MBAR_TEST_WAIT"; break;
+  case AsyncType::MBAR_TRY_WAIT: os << "MBAR_TRY_WAIT"; break;
+  case AsyncType::PIPE_INIT: os << "PIPE_INIT"; break;
+  case AsyncType::PIPE_PROD_ACQUIRE: os << "PIPE_PROD_ACQUIRE"; break;
+  case AsyncType::PIPE_PROD_COMMIT: os << "PIPE_PROD_COMMIT"; break;
+  case AsyncType::PIPE_CONS_WAIT: os << "PIPE_CONS_WAIT"; break;
+  case AsyncType::PIPE_CONS_RELEASE: os << "PIPE_CONS_RELEASE"; break;
+  case AsyncType::TMA_LOAD: os << "TMA_LOAD"; break;
+  case AsyncType::TMA_STORE: os << "TMA_STORE"; break;
+  case AsyncType::ASYNC_FENCE: os << "ASYNC_FENCE"; break;
+  case AsyncType::ASYNC_GROUP_COMMIT: os << "ASYNC_GROUP_COMMIT"; break;
+  case AsyncType::ASYNC_GROUP_WAIT_READ: os << "ASYNC_GROUP_WAIT_READ"; break;
+  case AsyncType::ASYNC_GROUP_WAIT_WRITE: os << "ASYNC_GROUP_WAIT_WRITE"; break;
+  default:
+    assert(false);
+  }
+  return os;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 enum class CsrType {
   CSRRW,
   CSRRS,
@@ -678,6 +727,7 @@ using OpType = std::variant<
 , VoteType
 , ShflType
 , WctlType
+, AsyncType
 #ifdef EXT_V_ENABLE
 , VsetType
 , VlsType
@@ -697,6 +747,7 @@ using IntrArgs = std::variant<
 , IntrFpuArgs
 , IntrCsrArgs
 , IntrWctlArgs
+, IntrAsyncArgs
 #ifdef EXT_V_ENABLE
 , IntrVsetArgs
 , IntrVlsArgs
